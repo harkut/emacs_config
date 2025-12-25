@@ -1,0 +1,4 @@
+/home/harkut/.emacs.d/elpa/vterm-20251119.1653/build/CMakeFiles/vterm-module.dir
+/home/harkut/.emacs.d/elpa/vterm-20251119.1653/build/CMakeFiles/run.dir
+/home/harkut/.emacs.d/elpa/vterm-20251119.1653/build/CMakeFiles/edit_cache.dir
+/home/harkut/.emacs.d/elpa/vterm-20251119.1653/build/CMakeFiles/rebuild_cache.dir

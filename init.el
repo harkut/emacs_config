@@ -1,364 +1,540 @@
-
 ;;; Code:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Указываем используемые пакеты.
+;; 1. Система пакетов
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (require 'package)
-(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t)
+(setq package-archives '(("melpa" . "https://melpa.org/packages/")
+                         ("gnu"   . "https://elpa.gnu.org/packages/")
+                         ("nongnu" . "https://elpa.nongnu.org/nongnu/")))
 (package-initialize)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Кодировка языковая.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(set-language-info-alist
- "Windows-1251" `((charset cp1251)
-		  (coding-system cp1251)
-		  (coding-priority cp1251)
-		  (nonascii-translation . cp1251)
-		  (input-method . "russian-typewriter")
-		  (features cyril-util)
-		  (unibyte-display . cp1251)
-		  (sample-text . "Russian (Русский)	Здравствуйте!")
-		  (documentation . "Support for Windows cp1251."))
- '("Cyrillic"))
 
-(set-default-coding-systems 'utf-8-unix)
-(prefer-coding-system 'utf-8-unix)
-(set-default buffer-file-coding-system 'utf-8-unix)
+(unless (package-installed-p 'use-package)
+  (package-refresh-contents)
+  (package-install 'use-package))
+
+(require 'use-package)
+(setq use-package-always-ensure t)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Путь к лисповым исходникам.
+;; 2. Helm (Интерфейс и Навигация)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(add-to-list 'load-path "~/.emacs.d/lisp")
+(use-package helm
+  :init
+  (helm-mode 1)
+  :bind
+  (("M-x" . helm-M-x)
+   ("C-x C-f" . helm-find-files)
+   ("C-x b" . helm-mini)
+   ("C-s" . helm-occur)
+   ("M-y" . helm-show-kill-ring)
+   :map helm-map
+   ("<tab>" . helm-execute-persistent-action)
+   :map helm-find-files-map
+   ("C-l" . helm-find-files-up-one-level))
+  :custom
+  (helm-ff-auto-update-initial-value nil)
+  (helm-find-files-ignore-thing-at-point t)
+  (helm-split-window-inside-p nil)             ; Открывать на всю ширину
+  (helm-echo-input-in-header-line nil)
+  (helm-display-header-line nil)
+  :config
+  ;; ИСПРАВЛЕНИЕ: Используем специальную функцию, которая умеет обходить
+  ;; выделенные (dedicated) окна window-purpose
+  (setq helm-display-function 'helm-display-buffer-in-own-frame)
+
+  ;; Если вы хотите, чтобы Helm открывался в том же фрейме, но игнорировал блокировку:
+  (setq helm-display-function (lambda (buffer &optional resume)
+                                (let ((display-buffer-overriding-action
+                                       '(nil . ((inhibit-same-window . nil)
+                                                (inhibit-switch-frame . nil)))))
+                                  (helm-default-display-buffer buffer resume))))
+
+  (setq helm-autoresize-max-height 0
+        helm-autoresize-min-height 20))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Подсветка символов выходящих за допустимую ширину строки.
+;; 3. Ядро Emacs и Интерфейс
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(autoload 'spice-mode "spice-mode" "Spice/Layla Editing Mode" t)
-;(autoload 'flex-mode "flex-mode" "Flex Mode" t)
-(autoload 'column-enforce-mode
-  "column-enforce-mode"
-  "Highlight text that extends beyong a column"
-  t)
+(use-package emacs
+  :custom
+  (user-full-name "harkut")
+  (user-mail-address "yanovets.vasya@gmail.com")
+  (inhibit-startup-screen t)
+  (ring-bell-function 'ignore)
+  (column-number-mode t)
+  (indent-tabs-mode nil)
+  (default-tab-width 2)
+  (save-place-mode 1)
+  (fill-column 80)
+  (display-fill-column-indicator-column 80)
+  (initial-frame-alist '((top . 0) (left . 0) (width . 80) (height . 70)))
+  (default-frame-alist '((top . 0) (left . 0) (width . 80) (height . 70)))
+  :config
+  (fset 'yes-or-no-p 'y-or-n-p)
+  (tool-bar-mode -1)
+  (menu-bar-mode -1)
+  (tooltip-mode -1)
+
+  (global-visual-line-mode -1)
+  (global-display-fill-column-indicator-mode 1)
+
+  ;; Убираем ограничитель в отладчике и консолях
+  (add-hook 'gud-mode-hook (lambda ()
+                             (display-fill-column-indicator-mode -1)))
+  (add-hook 'comint-mode-hook (lambda ()
+                                (display-fill-column-indicator-mode -1)))
+
+  ;; Умная функция переноса для защиты синтаксиса
+  (defun my/setup-smart-wrap ()
+    "Настройка: в коде только в комментариях, в тексте — везде."
+    (setq fill-column 80)
+    (if (derived-mode-p 'prog-mode 'makefile-mode)
+        (setq comment-auto-fill-only-comments t)
+      (setq comment-auto-fill-only-comments nil))
+    (auto-fill-mode 1))
+
+  ;; Применяем ко всем режимам (C, Lisp, Makefile, Org)
+  (add-hook 'prog-mode-hook 'my/setup-smart-wrap)
+  (add-hook 'text-mode-hook 'my/setup-smart-wrap)
+  (add-hook 'makefile-mode-hook 'my/setup-smart-wrap)
+  (add-hook 'lisp-mode-hook 'my/setup-smart-wrap)
+
+  (add-hook 'before-save-hook 'delete-trailing-whitespace)
+  (custom-set-faces
+   '(default ((t (:stipple nil :background "#202022" :foreground "white"
+                           :height 70 :family "DejaVu Sans Mono"))))))
+
+;; Восстановление сессии (открытые файлы, курсоры)
+(use-package desktop
+  :ensure nil
+  :config
+  (desktop-save-mode 1)
+  (setq desktop-dirname ".")           ; Сохранять десктоп в папке запуска
+  (setq desktop-path '("."))           ; Искать десктоп только в текущей папке
+  (setq desktop-save t)                ; Сохранять автоматически без вопросов
+  (setq desktop-load-locked-desktop t) ; Грузить, даже если есть lock-файл
+  (setq desktop-restore-eager 10))     ; Восстанавливать первые 10 буферов сразу
+
+;; Перемещение между окнами M + стрелки
+(use-package windmove
+  :ensure nil
+  :config
+  (windmove-default-keybindings 'M))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настройки под разные языки.
+;; 4. Кодировки (Windows-1251)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(use-package mule
+  :ensure nil
+  :config
+  (set-language-info-alist
+   "Windows-1251" `((charset cp1251) (coding-system cp1251)
+                    (coding-priority cp1251)
+                    (input-method . "russian-typewriter")
+                    (features cyril-util)
+                    (sample-text . "Russian (Русский) Здравствуйте!")
+                    (documentation . "Support for Windows cp1251."))
+   '("Cyrillic"))
+  (set-default-coding-systems 'utf-8-unix)
+  (prefer-coding-system 'utf-8-unix))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 5. Ассоциации файлов (auto-mode-alist)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (setq auto-mode-alist
-      (append (list (cons "\\.sp$"   'spice-mode)
-                    (cons "\\.cir$"  'spice-mode)
-                    (cons "\\.ckt$"  'spice-mode)
-                    (cons "\\.mod$"  'spice-mode)
-                    (cons "\\.cdl$"  'spice-mode)
-                    (cons "\\.chi$"  'spice-mode)
-                    (cons "\\.inp$"  'spice-mode)
-                    (cons "\\.scs$"  'spice-mode)
-                    (cons "\\.a51$"  'asm-mode)
-                    (cons "\\.cc$"   'c++-mode)
-                    (cons "\\.c$"   'c-mode)
-                    (cons "\\.cpp$"  'c++-mode)
-                    (cons "\\.cxx$"  'c++-mode)
-                    (cons "\\.h$"    'c++-mode)
-                    (cons "\\.tcc$"  'c++-mode)
-                    (cons "\\.icc$"  'c++-mode)
-                    (cons "\\.il$"   'lisp-mode)
-                    (cons "\\.ils$"  'lisp-mode)
-                    (cons "\\.vh$"   'verilog-mode)
-                    (cons "\\.vams$" 'verilog-mode)
-                    (cons "\\.vo$"   'verilog-mode)
-                    (cons "\\.vn$"   'verilog-mode)
-                    (cons "\\.svh$"  'verilog-mode)
-                    (cons "\\.xdc$"  'tcl-mode)
-                    (cons "\\.cpf$"  'tcl-mode)
-                    (cons "\\.sdc$"  'tcl-mode)
-                    (cons "\\.tm$"   'tcl-mode)
-                    (cons "\\.l$"    'c++-mode)
-                    (cons "makefile.inc"  'makefile-gmake-mode))
+      (append '(;; Spice Mode
+                ("\\.sp$"    . spice-mode)
+                ("\\.cir$"   . spice-mode)
+                ("\\.ckt$"   . spice-mode)
+                ("\\.mod$"   . spice-mode)
+                ("\\.cdl$"   . spice-mode)
+                ("\\.chi$"   . spice-mode)
+                ("\\.inp$"   . spice-mode)
+                ("\\.scs$"   . spice-mode)
+                ;; Assembler
+                ("\\.a51$"   . asm-mode)
+                ;; C / C++
+                ("\\.cc$"    . c++-mode)
+                ("\\.cpp$"   . c++-mode)
+                ("\\.cxx$"   . c++-mode)
+                ("\\.h$"     . c++-mode)
+                ("\\.tcc$"   . c++-mode)
+                ("\\.icc$"   . c++-mode)
+                ("\\.l$"     . c++-mode)
+                ("\\.c$"     . c-mode)
+                ;; Lisp
+                ("\\.il$"    . lisp-mode)
+                ("\\.ils$"   . lisp-mode)
+                ;; Verilog
+                ("\\.vh$"    . verilog-mode)
+                ("\\.vams$"  . verilog-mode)
+                ("\\.vo$"    . verilog-mode)
+                ("\\.vn$"    . verilog-mode)
+                ("\\.svh$"   . verilog-mode)
+                ;; Tcl
+                ("\\.xdc$"   . tcl-mode)
+                ("\\.cpf$"   . tcl-mode)
+                ("\\.sdc$"   . tcl-mode)
+                ("\\.tm$"    . tcl-mode)
+                ;; Docker
+                ("Dockerfile\\'" . dockerfile-mode)
+                ("docker-compose\\.yml\\'" . yaml-mode)
+                ;; Makefile
+                ("\\.mk\\'" . makefile-gmake-mode)
+                ("makefile\\.inc\\'" . makefile-gmake-mode))
               auto-mode-alist))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настройка окружения.
+;; 6. Интеграция Valgrind (Интерактивный запуск)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(use-package compile
+  :ensure nil
+  :bind ("<f7>" . valgrind)
+  :preface
+  (defgroup valgrind nil
+    "Run valgrind as inferior of Emacs, parse error messages."
+    :group 'tools
+    :group 'processes)
+
+  (defcustom valgrind-command "valgrind --leak-check=full "
+    "Last shell command used to run valgrind."
+    :type 'string
+    :group 'valgrind)
+
+  (defvar valgrind-history nil)
+
+  (defun valgrind (command)
+    "Запуск Valgrind интерактивно с переходом в конец буфера."
+    (interactive
+     (if (or compilation-read-command current-prefix-arg)
+         (list (read-from-minibuffer "Valgrind command: "
+                                     (if (stringp valgrind-command)
+                                         valgrind-command
+                                       (eval valgrind-command))
+                                     nil nil '(valgrind-history . 1)))
+       (list (if (stringp valgrind-command) valgrind-command
+               (eval valgrind-command)))))
+    (unless (equal command valgrind-command)
+      (setq valgrind-command command))
+
+    (let* ((buffer-name "*valgrind*")
+           (buffer (get-buffer-create buffer-name))
+           (cmd-args (split-string-and-unquote command)))
+      (with-current-buffer buffer
+        (setq buffer-read-only nil)
+        (erase-buffer)
+        (apply 'make-comint-in-buffer "valgrind" buffer
+               (car cmd-args) nil (cdr cmd-args))
+        (compilation-shell-minor-mode 1)
+        (setq-local comint-scroll-show-maximum-output t)
+        (setq-local comint-output-filter-functions
+                    (append comint-output-filter-functions
+                            '(comint-postoutput-scroll-to-bottom))))
+      (pop-to-buffer buffer)
+      (goto-char (point-max)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 7. Языки и Отступы
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(use-package cc-mode
+  :ensure nil
+  :custom
+  (c-basic-offset 2)
+  (c-electric-flag t)
+  :config
+  (setq c-offsets-alist
+        '((member-init-intro . ++) (statement-cont . ++) (inher-intro . ++)
+          (access-label . -1) (arglist-intro . ++) (topmost-intro-cont . ++)
+          (innamespace . 0)))
+  :hook
+  (c-mode-common . (lambda ()
+                     (hs-minor-mode t)
+                     (local-set-key (kbd "C-c <right>") 'hs-show-block)
+                     (local-set-key (kbd "C-c <left>")  'hs-hide-block))))
+
+(use-package verilog-mode
+  :custom
+  (verilog-indent-level 2)
+  (verilog-indent-level-module 2)
+  (verilog-indent-level-declaration 2)
+  (verilog-indent-level-behavioral 2)
+  (verilog-case-indent 2)
+  (verilog-auto-newline nil)
+  (verilog-highlight-p1800-keywords t))
+
+(use-package tcl
+  :ensure nil
+  :custom
+  (tcl-indent-level 2)
+  (tcl-continued-indent-level 4))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 8. Инструменты (GDB, Doxymacs, LSP, Flycheck)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(use-package gdb-mi
+  :ensure nil
+  :init (add-to-list 'exec-path "/usr/bin/")
+  :custom
+  (gdb-many-windows nil)
+  :bind
+  ("<f5>" . gud-cont)
+  ("<f6>" . gud-next)
+  :config
+  (advice-add 'gdb-input :filter-args
+              (lambda (args)
+                (let ((str (car args)))
+                  (if (and (stringp str) (string-match
+                                          "set target-async" str))
+                      (list (replace-regexp-in-string
+                             "set target-async" "set mi-async" str) (cadr args))
+                    args)))
+              '((name . "fix-gdb-deprecated-async"))))
+
+(use-package doxymacs
+  :hook (c-mode-common . doxymacs-mode)
+  :mode ("Doxyfile" . doxymacs-mode)
+  :bind
+  (("C-c d ?" . doxymacs-lookup)
+   ("C-c d r" . doxymacs-rescan-tags)
+   ("C-c d RET" . doxymacs-insert-command)
+   ("C-c d f" . doxymacs-insert-function-comment)
+   ("C-c d i" . doxymacs-insert-file-comment)
+   ("C-c d ;" . doxymacs-insert-member-comment)
+   ("C-c d m" . doxymacs-insert-blank-multiline-comment)
+   ("C-c d s" . doxymacs-insert-blank-singleline-comment)
+   ("C-c d @" . doxymacs-insert-grouping-comments)))
+:config
+:config
+(require 'project)
+
+  (defun my/get-project-root-git ()
+    "Находит корень проекта, ориентируясь на .git."
+    (let ((pr (project-current)))
+      (cond (pr (project-root pr))
+            ((locate-dominating-file default-directory ".git"))
+            (t nil))))
+
+  (defun my/doxygen-generate-from-root ()
+    "Запускает 'make doc' в корневом каталоге проекта."
+    (interactive)
+    (let ((root (my/get-project-root-git)))
+      (if (and root (file-exists-p (expand-file-name "Makefile" root)))
+          (let ((default-directory root))
+            (message "Doxygen: запуск сборки из корня: %s" root)
+            (start-process "doxygen-root-make" "*doxygen-log*" "make" "doc"))
+        (message "Makefile не найден в корне %s" (or root "не определен")))))
+
+  (add-hook 'c-mode-common-hook
+            (lambda ()
+              (add-hook 'after-save-hook
+                        #'my/doxygen-generate-from-root nil t)))
+
+(use-package flycheck
+  :init (global-flycheck-mode)
+  :custom
+  (flycheck-disabled-checkers '(c/c++-clang))
+  :config
+  (when (file-exists-p ".emacs.flycheck.el") (load ".emacs.flycheck.el")))
+
+(use-package lsp-mode
+  :hook ((c++-mode c-mode yaml-mode) . lsp-deferred)
+  :commands (lsp lsp-deferred))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 9. Org Mode (Заметки и Задачи в иерархии проекта)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(use-package org
+  :ensure nil
+  :bind
+  (("C-c l" . org-store-link)
+   ("C-c a" . org-agenda)
+   ("C-c c" . org-capture))
+  :preface
+  (declare-function org-save-all-org-buffers "org")
+  (defun my/org-save-all-before-agenda (&rest _)
+    (interactive)
+    (when (featurep 'org) (org-save-all-org-buffers)))
+
+  (defun my/org-current-project-notes ()
+    "Ищет Makefile и возвращает путь к notes.org."
+    (let ((project-dir (locate-dominating-file default-directory "Makefile")))
+      (if project-dir
+          (expand-file-name "notes.org" project-dir)
+        (expand-file-name "notes.org" "~/org/"))))
+
+  :custom
+  (org-directory "~/org")
+  (org-agenda-files '("~/org"))
+  (org-capture-templates
+   '(("t" "Задачка (Глобальная)" entry
+      (file+headline "~/org/tasks.org" "Входящие")
+      "* TODO %?\n  Создано: %U\n  %a")
+     ("n" "Заметка к проекту (ex_*)" entry
+      (file+headline my/org-current-project-notes "Notes")
+      "* %?\n  Дата: %U\n  Контекст: %a\n  %i")))
+
+  (org-todo-keywords
+   '((sequence "TODO(t)" "NEXT(n)" "WAITING(w)" "|" "DONE(d)" "CANCELLED(c)")))
+  (org-hide-leading-stars t)
+  (org-ellipsis " ▼")
+  :config
+  (setq org-src-fontify-natively t
+        org-src-tab-acts-natively t)
+  ;; Включаем физический перенос и в Org
+  (add-hook 'org-mode-hook 'my/force-auto-fill)
+  (with-eval-after-load 'org-agenda
+    (advice-add 'org-agenda :before #'my/org-save-all-before-agenda)))
+
+(use-package org-bullets
+  :hook (org-mode . org-bullets-mode))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 10. Навигация и Дополнительно (GDB IDE - Custom Proportions)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(require 'cl-lib)
+(require 'gdb-mi)
+
+(use-package delsel
+  :ensure nil
+  :config (delete-selection-mode t))
+
+(setq gdb-many-windows nil)
+
+(defun my/create-4-pane-grid ()
+  "Создает сетку 2x2 в текущем фрейме."
+  (delete-other-windows)
+  (let* ((w1 (selected-window))
+         (w2 (split-window w1 nil 'right))
+         (w3 (split-window w1 nil 'below))
+         (w4 (split-window w2 nil 'below)))
+    (dolist (w (list w1 w2 w3 w4))
+      (with-selected-window w
+        (purpose-set-window-purpose 'edit)))))
+
+(defun my/get-gdb-buffer-by-mode (mode)
+  "Поиск буфера GDB по Major Mode."
+  (cl-find-if (lambda (b) (with-current-buffer b (eq major-mode mode)))
+              (buffer-list)))
+
+(defun my/populate-gdb-windows ()
+  "Заполнение окон строго по их назначению."
+  (interactive)
+  (let ((mode-to-purpose '((gdb-locals-mode       . gdb-locals)
+                           (gdb-registers-mode    . gdb-regs)
+                           (gdb-stack-buffer-mode  . gdb-stack)
+                           (gdb-frames-mode       . gdb-stack)
+                           (gdb-breakpoints-mode  . gdb-breaks)
+                           (gdb-disassembly-mode  . gdb-disasm)
+                           (gdb-inferior-io-mode  . gdb-io)
+                           (gud-mode              . gdb-out))))
+    (dolist (mapping mode-to-purpose)
+      (let* ((mode (car mapping))
+             (purp (cdr mapping))
+             (buf (my/get-gdb-buffer-by-mode mode))
+             (win (cl-find-if (lambda (w)
+                                (and (fboundp 'purpose-window-purpose-get)
+                                     (eq (purpose-window-purpose-get w) purp)))
+                              (window-list))))
+        (when (and buf win)
+          (set-window-buffer win buf)
+          (set-window-dedicated-p win t))))))
+
+(defun my/apply-gdb-layout ()
+  "Построение IDE во втором фрейме с пропорциями 10-10-10-10-60 справа."
+  (interactive)
+  (delete-other-windows)
+  (let* ((left-win (selected-window))
+         (right-win
+          (split-window left-win (floor (* (window-total-width) 0.55)) 'right)))
+
+    ;; ЛЕВАЯ КОЛОННА
+    (with-selected-window left-win
+      (let* ((w-gdb (split-window-below (floor (* (window-height) 0.7))))
+             (w-io  (with-selected-window w-gdb
+                      (split-window-below (floor (* (window-height) 0.5))))))
+        (purpose-set-window-purpose 'edit left-win)
+        (purpose-set-window-purpose 'gdb-out w-gdb)
+        (purpose-set-window-purpose 'gdb-io w-io)
+        (switch-to-buffer (other-buffer (current-buffer) t))))
+
+    ;; ПРАВАЯ КОЛОННА (Настройка пропорций)
+    (with-selected-window right-win
+      (let* ((total-h (window-height))
+             (h-step (floor (* total-h 0.1))) ; Шаг в 10%
+             (w-stack  (split-window-below h-step))
+             (w-locals (with-selected-window w-stack (split-window-below h-step)))
+             (w-regs   (with-selected-window w-locals (split-window-below h-step)))
+             (w-breaks (with-selected-window w-regs (split-window-below h-step))))
+
+        (purpose-set-window-purpose 'gdb-disasm right-win)
+        (purpose-set-window-purpose 'gdb-stack  w-stack)
+        (purpose-set-window-purpose 'gdb-locals w-locals)
+        (purpose-set-window-purpose 'gdb-regs   w-regs)
+        (purpose-set-window-purpose 'gdb-breaks w-breaks)))
+
+    ;; Генерация буферов
+    (gdb-display-io-buffer)
+    (gdb-display-gdb-buffer)
+    (gdb-display-registers-buffer)
+    (gdb-display-locals-buffer)
+    (gdb-display-stack-buffer)
+    (gdb-display-breakpoints-buffer)
+    (gdb-display-disassembly-buffer)
+
+    (run-with-timer 1.0 nil #'my/populate-gdb-windows)))
+
+(use-package window-purpose
+  :config
+  (purpose-mode 1)
+  ;; Разрешаем Helm открываться поверх Purpose-окон
+  (add-to-list 'purpose-user-regexp-purposes '("^\\*helm" . nil))
+
+  (defun load-purpose-mode ()
+    (interactive)
+    ;; Прижимаем основной фрейм влево
+    (set-frame-parameter nil 'left 0)
+    (set-frame-parameter nil 'top 0)
+    (my/create-4-pane-grid)
+
+    (let ((f2 (make-frame '((name . "GDB-DEBUG")
+                            (width . 200)
+                            (height . 85)
+                            (left . -1)  ; Прижимаем вправо
+                            (top . 0)))))
+      (with-selected-frame f2
+        (call-interactively 'gdb)
+        (my/apply-gdb-layout))))
+  :bind (("M-L" . load-purpose-mode)
+         ("M-g L" . my/apply-gdb-layout)))
+
+(global-set-key (kbd "C-x /") (lambda () (interactive)
+                                (find-file "~/.emacs.d/init.el")))
+
+(provide 'init)
 (custom-set-variables
  ;; custom-set-variables was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
- '(c-basic-offset 2)
- '(c-electric-flag t t)
- '(c-offsets-alist
-   '((member-init-intro . ++)
-     (statement-cont . ++)
-     (inher-intro . ++)
-     (access-label . -1)
-     (arglist-intro . ++)
-     (topmost-intro-cont . ++)
-     (innamespace . 0)))
- '(column-number-mode t)
- '(default-frame-alist
-    '((menu-bar-lines . 0)
-      (top . 0)
-      (left . 0)
-      (width . 80)
-      (height . 70)))
- '(default-tab-width 2)
- '(dired-listing-switches "-alnGho")
- '(dired-omit-files "^\\.?#\\|^\\.$\\|^\\.\\.$\\|^\\.[^.].+$")
- '(indent-tabs-mode nil)
- '(inhibit-startup-screen t)
- '(initial-frame-alist
-   '((menu-bar-lines . 0)
-     (tool-bar-lines . 0)
-     (top . 0)
-     (left . 0)
-     (width . 80)
-     (height . 70)))
  '(package-selected-packages
-   '(doxymacs use-package sr-speedbar yaml-mode lsp-mode yasnippet lsp-treemacs helm-lsp projectile hydra flycheck company avy which-key helm-xref dap-mode helm iedit flycheck-pos-tip evil docker magit markdown-mode org treemacs delsel))
- '(python-indent 2)
- '(ring-bell-function 'ignore)
- '(save-place-mode 1)
- '(tcl-continued-indent-level 4)
- '(tcl-indent-level 2)
- '(tool-bar-mode nil)
- '(tooltip-mode nil)
- '(user-full-name "harkut")
- '(user-mail-address "yanovets.vasya@gmail.com")
- '(verilog-auto-newline nil)
- '(verilog-case-indent 2)
- '(verilog-cexp-indent 2)
- '(verilog-highlight-grouping-keywords t)
- '(verilog-highlight-p1800-keywords t)
- '(verilog-indent-level 2)
- '(verilog-indent-level-behavioral 2)
- '(verilog-indent-level-declaration 2)
- '(verilog-indent-level-directive 2)
- '(verilog-indent-level-module 2)
- '(verilog-minimum-comment-distance 5)
- '(warning-suppress-log-types '((initialization) (comp)))
- '(warning-suppress-types '((comp))))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; "Рожа" Emacs-а.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+   '(window-purpose org-bullets yasnippet yaml-mode which-key vterm use-package sr-speedbar projectile popup pkg-info org magit iedit helm-xref helm-lsp haskell-mode flycheck-pos-tip evil doxymacs docker dap-mode company)))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
- '(default ((t (:stipple nil :background "#202022" :foreground "white" :inverse-video nil :box nil :strike-through nil :overline nil :underline nil :slant normal :weight normal :height 70 :width normal :foundry "unknown" :family "DejaVu Sans Mono")))))
+ '(default ((t (:stipple nil :background "#202022" :foreground "white" :height 70 :family "DejaVu Sans Mono")))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Более краткий emacs.
+;; 11. Git (Magit)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(fset 'yes-or-no-p 'y-or-n-p)
-
-(use-package delsel
-  :config (delete-selection-mode t)) ;; Удалять выделенный фрагмент при вводе текста
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Переход к конфигу.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun load-config ()
-  (interactive)
-  (find-file "~/.emacs.d/init.el"))
-(global-set-key "\C-x/" 'load-config)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Буфер *scratch* не нужен.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; (defun init-kill-scratch ()
-;;   "Закрыть буфер *scratch* при запуске редактора или подключении клиента."
-;;   (when (get-buffer "*scratch*")
-;;     (kill-buffer "*scratch*")))
-;; (add-hook 'after-init-hook 'init-kill-scratch)
-;; (add-hook 'server-after-make-frame-hook 'init-kill-scratch)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настройка пакета desktop.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(use-package desktop
+(use-package magit
+  :bind ("C-x g" . magit-status)
   :custom
-  (desktop-dirname ".")
-  (desktop-path (list "."))
-  (desktop-load-locked-desktop 1)
-  (desktop-restore-frames 1)
-  (desktop-save 1)
-  :config
-  (desktop-save-mode 1)
-  (add-to-list 'delete-frame-functions 'desktop-save)
-  (add-to-list 'desktop-modes-not-to-save 'dired-mode)
-  :hook
-  (after-init . desktop-read)
-  (server-after-make-frame . desktop-read)
-  (kill-emacs . (lambda () (desktop-save "." 1)))
-  (server-done . desktop-save)
-  )
+  (magit-display-buffer-function
+   'magit-display-buffer-same-window-except-diff-v1))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настройка пакета treemacs.
+;; 12. Docker
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(use-package treemacs
-  :bind
-  ("C-x t t"   . treemacs)
-  ("M-0"       . treemacs-select-window)
-  ("C-x t 1"   . treemacs-delete-other-windows)
-  ("C-x t B"   . treemacs-bookmark)
-  )
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настройка пакета orgmode.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(use-package org
+(use-package docker
+  :bind ("C-c M-d" . docker)
   :custom
-  (org-log-done 'time)
-  :mode
-  ("\\.org$" . org-mode)
-  :bind
-  ("C-x C-t" . org-todo)
-  ("\C-cl" . org-store-link)
-  ("\C-ca" . org-agenda)
-  )
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настройка пакета valgrind.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; (defun valgrind ()
-;;   (interactive)
-;;   (compilation-minor-mode)
-;;   (define-key compilation-minor-mode-map (kbd "M-p") ‘comint-send-input)
-;;     (define-key compilation-minor-mode-map (kbd "S-M-p") ‘compile-goto-error))
+  (docker-command "docker"))
 
-;; (add-hook ‘shell-mode-hook ‘valgrind)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настройка пакета flycheck.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(require 'flycheck)
-(setq-default flycheck-disabled-checkers '(c/c++-clang))
-(global-flycheck-mode)
-;Disable Flycheck for LaTex
-(setq flycheck-global-modes '(not LaTeX-mode latex-mode))
-;load flycheck settings from current directory file .emacs.flycheck.el
-(add-to-list 'load-path ".")
-(if (file-exists-p ".emacs.flycheck.el")
-   (require '.emacs.flycheck) )
-
-(add-hook 'c-mode-common-hook
-          (lambda()
-            (local-set-key (kbd "C-c <right>") 'hs-show-block)
-            (local-set-key (kbd "C-c <left>")  'hs-hide-block)
-            (local-set-key (kbd "C-c <up>")    'hs-hide-all)
-            (local-set-key (kbd "C-c <down>")  'hs-show-all)
-            (hs-minor-mode t)))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Нормальный бег между буферами в окне
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(global-set-key (kbd "M-<left>")  'windmove-left)
-(global-set-key (kbd "M-<right>") 'windmove-right)
-(global-set-key (kbd "M-<up>")    'windmove-up)
-(global-set-key (kbd "M-<down>")  'windmove-down)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Убить все буферы кроме выделенного
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; (defun kill-other-buffers ()
-;;     "Kill all other buffers."
-;;     (interactive)
-;;     (mapc 'kill-buffer 
-;;           (delq (current-buffer) 
-;;                 (remove-if-not 'buffer-file-name (buffer-list)))))
-
-;; (defun close-all-buffers ()
-;;   (interactive)
-;;   (mapc 'kill-buffer (buffer-list)))
-
-;; (defun only-current-buffer () 
-;;   (interactive)
-;;     (mapc 'kill-buffer (cdr (buffer-list (current-buffer)))))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настраиваем пакет lsp и helm.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(use-package lsp-mode
-             :hook ((c++-mode c-mode glsl-mode yaml-mode) . lsp-deferred)
-             :commands lsp lsp-deferred)
-
-(when (cl-find-if-not #'package-installed-p package-selected-packages)
-  (package-refresh-contents)
-  (mapc #'package-install package-selected-packages))
-
-(helm-mode)
-(require 'helm-xref)
-(define-key global-map [remap find-file] #'helm-find-files)
-(define-key global-map [remap execute-extended-command] #'helm-M-x)
-(define-key global-map [remap switch-to-buffer] #'helm-mini)
-
-(which-key-mode)
-
-;; (setq gc-cons-threshold (* 100 1024 1024)
-;;       read-process-output-max (* 1024 1024)
-;;       treemacs-space-between-root-nodes nil
-;;       company-idle-delay 0.0
-;;       company-minimum-prefix-length 1
-;;       lsp-idle-delay 0.1)  ;; clangd is fast
-
-;; (with-eval-after-load 'lsp-mode
-;;   (add-hook 'lsp-mode-hook #'lsp-enable-which-key-integration)
-;;   (require 'dap-cpptools)
-;;   (yas-global-mode))
-
-(with-eval-after-load 'flycheck (flycheck-pos-tip-mode))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настраиваем пакет gdb.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(add-to-list 'exec-path "/usr/bin/gdb")
-(use-package gdb
-  :custom
-  (gdb-many-windows t)
-  (dap-auto-configure-mode nil)
-  :bind
-  ("<f5>" . gud-cont)
-  ("<f6>" . gud-next)
-  )
-;; ;;(require 'gdb) ; Загружает GDB-режим
-;; (setq gdb-many-windows t) ; Открывает несколько окон (stdout, regs, etc.)
-;; (setq dap-auto-configure-mode nil)
-
-;; (defun my-gdb-mode-hook ()
-;;   "Customizations for gdb-mode."
-;;   ;; Bind F5 to 'gud-cont' (continue)
-;;   (local-set-key (kbd "<f5>") 'gud-cont)
-;;   ;; Bind F10 to 'gud-next' (step over)
-;;   (local-set-key (kbd "<f10>") 'gud-next))
-
-;; (add-hook 'gdb-mode-hook 'my-gdb-mode-hook)
-
-;; ;; Автоматическая загрузка вашего .gdbinit
-;; (if (file-exists-p "~/.gdbinit")
-;;     (load-file "~/.gdbinit")
-;;   (message "GDB init file not found: ~/.gdbinit"))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Настраиваем пакет doxygen.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(use-package doxymacs
-  :hook
-  (c-mode-common-hook . doxymacs-mode)
-  :mode
-  ("Doxyfile" . doxymacs-mode)
-  ("\\.c$" . doxymacs-mode)
-  :bind 
-  ;; Lookup documentation for the symbol at point.
-  ("C-c d ?" . doxymacs-lookup)
-  ;; Rescan your Doxygen tags file.
-  ("C-c d r" . doxymacs-rescan-tags)
-  ;; Prompt you for a Doxygen command to enter, and its
-  ;; arguments.
-  ("C-c d RET" . doxymacs-insert-command)
-  ;; Insert a Doxygen comment for the next function.
-  ("C-c d f" . doxymacs-insert-function-comment)
-  ;; Insert a Doxygen comment for the current file.
-  ("C-c d i" . doxymacs-insert-file-comment)
-  ;; Insert a Doxygen comment for the current member.
-  ("C-c d ;" . doxymacs-insert-member-comment)
-  ;; Insert a blank multi-line Doxygen comment.
-  ("C-c d m" . doxymacs-insert-blank-multiline-comment)
-  ;; Insert a blank single-line Doxygen comment.
-  ("C-c d s" . doxymacs-insert-blank-singleline-comment)
-  ;; Insert a grouping comments around the current region.
-  ("C-c d @" . doxymacs-insert-grouping-comments)
-  ;; :custom
-  ;;   (doxymacs-doxygen-dirs
-  ;;    '(("^/home/me/project/foo/"
-  ;;       "http://someplace.com/doc/foo/foo.xml"
-  ;;        "http://someplace.com/doc/foo/")
-  ;;      ("^/home/me/project/bar/"
-  ;;       "~/project/bar/doc/bar.xml"
-  ;;       "file:///home/me/project/bar/doc/")))
-)
-
+(use-package dockerfile-mode)
