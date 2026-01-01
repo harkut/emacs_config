@@ -5,16 +5,36 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 0. Безопасность и производительность
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(setq debug-on-error t)
+(message "Начинаем загрузку конфигурации...")
+
+;; Ускорение package.el: отключаем проверки и обновления при старте
+(setq package-check-signature nil
+      package-archive-check-signature nil
+      package-enable-at-startup nil      ; Не загружать пакеты автоматически
+      package-update-contents-and-compile nil) ; Не компилировать при обновлении
+
+;; Блокировать проверку архивов при каждом запуске
+(defvar my/package-archives-checked nil)
+(unless my/package-archives-checked
+  (setq my/package-archives-checked t)
+  (package-refresh-contents t)) ; t = только если кэш устарел
+
+;; Ускорение use-package
+(setq use-package-enable-imenu-support t
+      use-package-verbose nil           ; Отключить вывод отладки
+      use-package-minimum-reported-time 0.1) ; Показывать только медленные пакеты
+
+;; Ускорение file-name-handler-alist (кэширование путей)
+(defvar my/file-name-handler-alist-original file-name-handler-alist)
+(setq file-name-handler-alist nil)
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (setq file-name-handler-alist my/file-name-handler-alist-original)))
+
 ;; Отдельный файл для настроек GUI
 (setq custom-file (locate-user-emacs-file "custom-vars.el"))
 (load custom-file 'noerror 'nomessage)
-
-;; Ускоряем запуск
-(setq gc-cons-threshold (* 50 1024 1024))  ; 50MB
-(setq read-process-output-max (* 1024 1024)) ; 1MB
-
-;; Предотвращаем блокировку UI
-(setq-default bidi-display-reordering nil)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 0.1 Система ручной установки пакетов с авто-загрузкой
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -318,7 +338,7 @@
           (delete-directory subdir)
           (message "Структура пакета %s исправлена" pkg-str))))))
 
-;; Список пакетов для загрузки
+;; Список пакетов для загрузки (ДОБАВЛЕНЫ ПАКЕТЫ ДЛЯ LISP/SKILL)
 (setq my/core-packages
       '((use-package "https://github.com/jwiegley/use-package")
         (helm "https://github.com/emacs-helm/helm")
@@ -326,7 +346,7 @@
         (modern-cpp-font-lock "https://github.com/ludwigpacifici/modern-cpp-font-lock")
         (verilog-mode "https://github.com/veripool/verilog-mode")
         (yaml-mode "https://github.com/yoshiki/yaml-mode")
-        (doxymacs "https://github.com/doxymacs/doxymacs")
+        (doxymacs "https://github.com/pniedzielski/doxymacs")
         (flycheck "https://github.com/flycheck/flycheck")
         (lsp-mode "https://github.com/emacs-lsp/lsp-mode")
         (company "https://github.com/company-mode/company-mode")
@@ -341,7 +361,17 @@
 	(ag "https://github.com/Wilfred/ag.el")
         (rg "https://github.com/dajva/rg.el")
         (pdf-tools "https://github.com/vedang/pdf-tools")
-        (vterm "https://github.com/akermu/emacs-libvterm")))
+        (vterm "https://github.com/akermu/emacs-libvterm")
+        ;; Пакеты для Lisp/SKILL разработки
+        (slime "https://github.com/slime/slime")
+        (slime-company "https://github.com/anwyn/slime-company")
+        (highlight-parentheses "https://github.com/emacsmirror/highlight-parentheses")
+        (rainbow-delimiters "https://github.com/Fanael/rainbow-delimiters")
+        (paredit "https://github.com/emacsmirror/paredit")
+        (lispy "https://github.com/abo-abo/lispy")
+        (lisp-extra-font-lock "https://github.com/Lindydancer/lisp-extra-font-lock")
+        (zoutline "https://github.com/abo-abo/zoutline")
+	(skill-mode "https://github.com/ebecheto/Skill" "skillMode.el")))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 1. Система пакетов (обновлено)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -500,11 +530,6 @@
   ;; Удаление пробелов в конце строк
   (add-hook 'before-save-hook 'delete-trailing-whitespace)
 
-  ;; ;; Настройка шрифта (вынесена в custom-file)
-  ;; (unless (file-exists-p custom-file)
-  ;;   (custom-set-faces
-  ;;    '(default ((t (:family "DejaVu Sans Mono" :height 70 :background "#202022" :foreground "white"))))))
-
   ;; Режим подсветки парных скобок
   (show-paren-mode 1)
   (setq show-paren-delay 0))
@@ -549,7 +574,7 @@
   (prefer-coding-system 'utf-8-unix)
   (setq-default buffer-file-coding-system 'utf-8-unix))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 5. Ассоциации файлов (auto-mode-alist)
+;; 5. Ассоциации файлов (auto-mode-alist) - РАСШИРЕН ДЛЯ LISP/SKILL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Функция для определения C/C++ заголовочных файлов
 (defun my/c-or-c++-mode ()
@@ -590,9 +615,19 @@
                 ("\\.c\\'"     . c-mode)
                 ;; Flex/Lex файлы (отдельно!)
                 ("\\.l\\'"     . c-mode)  ;; Предполагаем, что это C, если нет flex-mode
-                ;; Lisp
+                ;; Lisp и SKILL файлы Cadence
                 ("\\.il\\'"    . lisp-mode)
                 ("\\.ils\\'"   . lisp-mode)
+                ("\\.cdf\\'"   . lisp-mode)    ; Cadence Design Framework
+                ("\\.bdf\\'"   . lisp-mode)    ; Cadence behavioral
+                ("\\.lef\\'"   . lisp-mode)    ; Library Exchange Format
+                ("\\.def\\'"   . lisp-mode)    ; Design Exchange Format
+                ("\\.lisp\\'"  . lisp-mode)    ; Common Lisp
+                ("\\.cl\\'"    . lisp-mode)    ; Common Lisp
+                ("\\.asd\\'"   . lisp-mode)    ; ASDF system definition
+                ("\\.lsp\\'"   . lisp-mode)    ; Lisp source
+                ("\\.fasl\\'"  . lisp-mode)    ; Lisp compiled
+                ("\\.sexp\\'"  . lisp-mode)    ; S-expressions
                 ;; Verilog
                 ("\\.v\\'"     . verilog-mode)
                 ("\\.vh\\'"    . verilog-mode)
@@ -623,7 +658,7 @@
                 ("\\.conf\\'" . conf-mode)
                 ("\\.ini\\'"  . conf-mode))
               auto-mode-alist))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 6. Интеграция Valgrind (Интерактивный запуск)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (use-package compile
@@ -730,6 +765,31 @@
 (use-package yaml-mode
   :mode (("\\.yml\\'" . yaml-mode)
          ("\\.yaml\\'" . yaml-mode)))
+
+
+;; ;; Конфигурация skill-mode (файл skillMode.el)
+;; ;; 1. Добавляем путь к директории с пакетом
+;; (add-to-list 'load-path "~/.emacs.d/manual-packages/skill-mode/")
+
+;; ;; 2. УДАЛЯЕМ старые привязки .il файлов к lisp-mode
+;; (setq auto-mode-alist
+;;       (cl-remove-if (lambda (pair)
+;;                       (and (eq (cdr pair) 'lisp-mode)
+;;                            (string-match "\\.\\(il\\|ils\\|cdf\\|bdf\\|lef\\|def\\)\\'" (car pair))))
+;;                     auto-mode-alist))
+
+;; ;; 3. ДОБАВЛЯЕМ новые привязки файлов к skill-mode
+;; (add-to-list 'auto-mode-alist '("\\.il\\'" . skill-mode))
+;; (add-to-list 'auto-mode-alist '("\\.ils\\'" . skill-mode))
+;; (add-to-list 'auto-mode-alist '("\\.cdf\\'" . skill-mode))
+;; (add-to-list 'auto-mode-alist '("\\.bdf\\'" . skill-mode))
+;; (add-to-list 'auto-mode-alist '("\\.lef\\'" . skill-mode))
+;; (add-to-list 'auto-mode-alist '("\\.def\\'" . skill-mode))
+
+;; ;; 4. ЗАГРУЖАЕМ файл ПО ЕГО НАСТОЯЩЕМУ ИМЕНИ
+;; (load "skillMode" nil t)  ;; "skillMode" - имя файла БЕЗ расширения .el
+;;                           ;; Второй аргумент nil: не требуется суффикс
+;;                           ;; Третий аргумент t: не вызывать ошибку, если файл не найден
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 8. Инструменты (GDB, Doxymacs, LSP, Flycheck)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -834,6 +894,178 @@
          ("<tab>" . company-complete-selection))
   :config
   (global-company-mode))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 8.1 Lisp и SKILL Development (Cadence)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Настройка SLIME для Common Lisp
+(use-package slime
+  :custom
+  (slime-lisp-implementations
+   '((sbcl ("sbcl" "--dynamic-space-size" "2000"))
+     (ccl ("ccl"))
+     (clisp ("clisp"))
+     (skill ("/usr/cadence/tools/bin/skill" "-i"))))  ; Для Cadence SKILL
+  (slime-default-lisp 'sbcl)
+  (slime-net-coding-system 'utf-8-unix)
+  (slime-complete-symbol-function 'slime-fuzzy-complete-symbol)
+  :config
+  (slime-setup '(slime-fancy slime-asdf slime-banner))
+
+  ;; Автозагрузка Lisp файлов
+  (add-hook 'lisp-mode-hook
+            (lambda ()
+              (unless (slime-connected-p)
+                (save-excursion
+                  (slime))))))
+
+;; Auto-complete для SLIME
+(use-package slime-company
+  :after (slime company)
+  :config
+  (setq slime-company-completion 'slime-fuzzy-complete-symbol))
+
+;; Подсветка парных скобок
+(use-package highlight-parentheses
+  :hook (lisp-mode . highlight-parentheses-mode)
+  :custom
+  (highlight-parentheses-colors '("#2aa198" "#268bd2" "#d33682" "#cb4b16"))
+  (highlight-parentheses-background-colors '("gray10")))
+
+;; Разноцветные скобки
+(use-package rainbow-delimiters
+  :hook (lisp-mode . rainbow-delimiters-mode))
+
+;; Структурное редактирование Lisp
+(use-package paredit
+  :hook (lisp-mode . enable-paredit-mode)
+  :bind (:map paredit-mode-map
+         ("M-(" . paredit-wrap-round)
+         ("M-[" . paredit-wrap-square)
+         ("M-{" . paredit-wrap-curly))
+  :custom
+  (paredit-space-for-delimiter-predicates nil))
+
+;; Навигация по S-выражениям
+(use-package lispy
+  :hook (lisp-mode . lispy-mode)
+  :custom
+  (lispy-key-theme '(special lispy c-digits)))
+
+;; Дополнительная подсветка для Lisp
+(use-package lisp-extra-font-lock
+  :hook (lisp-mode . lisp-extra-font-lock-mode))
+
+;; Специальные настройки для SKILL (Cadence)
+(defun my/skill-mode-setup ()
+  "Настройки для режима SKILL (Cadence)."
+  (interactive)
+  (setq-local indent-tabs-mode nil)
+  (setq-local tab-width 2)
+  (setq-local lisp-indent-offset 2)
+  (setq-local comment-start ";")
+  (setq-local comment-end "")
+  (setq-local comment-column 40)
+  (setq-local comment-multi-line t)
+
+  ;; Специфичные для SKILL ключевые слова
+  (font-lock-add-keywords
+   'lisp-mode
+   '(("\\<\\(let\\|foreach\\|prog\\|cond\\|when\\|unless\\|case\\)\\>"
+      1 font-lock-keyword-face)
+     ("\\<\\(defun\\|defmacro\\|defstruct\\|deftemplate\\)\\>"
+      1 font-lock-type-face)
+     ("\\<\\(t\\|nil\\|pi\\|inf\\|minusInf\\)\\>"
+      1 font-lock-constant-face)
+     ("\\<\\(lambda\\|closure\\)\\>"
+      1 font-lock-function-name-face)
+     ;; Cadence SKILL специфичные функции
+     ("\\<\\(axl\\|db\\|ge\\|leCreate\\)\\>"
+      1 font-lock-builtin-face)))
+
+  ;; Пользовательские команды для SKILL
+  (local-set-key (kbd "C-c C-e") 'slime-eval-last-expression)
+  (local-set-key (kbd "C-c C-b") 'slime-eval-buffer)
+  (local-set-key (kbd "C-c C-r") 'slime-eval-region)
+  (local-set-key (kbd "C-c C-c") 'slime-compile-defun)
+  (local-set-key (kbd "C-c C-k") 'slime-compile-and-load-file)
+
+  (message "SKILL mode configured for Cadence"))
+
+;; Автоматическая настройка для файлов SKILL
+(add-hook 'lisp-mode-hook
+          (lambda ()
+            (when (or (string-match "\\.il\\'" (buffer-file-name))
+                      (string-match "\\.ils\\'" (buffer-file-name))
+                      (string-match "\\.cdf\\'" (buffer-file-name))
+                      (string-match "\\.bdf\\'" (buffer-file-name))
+                      (string-match "\\.lef\\'" (buffer-file-name))
+                      (string-match "\\.def\\'" (buffer-file-name)))
+              (my/skill-mode-setup))))
+
+;; Интеграция с проектами Cadence
+(defun my/find-cadence-project-root ()
+  "Находит корень проекта Cadence по наличию файлов .cdsinit или .cdsenv."
+  (locate-dominating-file default-directory
+                          (lambda (dir)
+                            (or (file-exists-p (expand-file-name ".cdsinit" dir))
+                                (file-exists-p (expand-file-name ".cdsenv" dir))
+                                (file-exists-p (expand-file-name "cds.lib" dir))))))
+
+;; Функции для работы с Cadence
+(defun my/cadence-run-skill (expr)
+  "Выполнить выражение SKILL в Cadence."
+  (interactive "sSKILL expression: ")
+  (let ((skill-cmd (concat "skill -i \"" expr "\"")))
+    (compile skill-cmd)))
+
+(defun my/cadence-load-skill-file (file)
+  "Загрузить файл SKILL в Cadence."
+  (interactive "fLoad SKILL file: ")
+  (let ((skill-cmd (format "skill -i \"load \\\"%s\\\"\"" file)))
+    (compile skill-cmd)))
+
+(defun my/cadence-connect ()
+  "Подключиться к запущенному экземпляру Cadence."
+  (interactive)
+  (let ((default-directory (my/find-cadence-project-root)))
+    (when default-directory
+      (async-shell-command "virtuoso &" "*Cadence*")
+      (message "Cadence Virtuoso запущен"))))
+
+;; Добавляем команды в меню
+(define-key lisp-mode-map (kbd "C-c C-s") 'my/cadence-run-skill)
+(define-key lisp-mode-map (kbd "C-c C-l") 'my/cadence-load-skill-file)
+(define-key lisp-mode-map (kbd "C-c C-v") 'my/cadence-connect)
+
+;; Настройки для Common Lisp проектов
+(defun my/lisp-project-p ()
+  "Определяет, является ли текущий проект Lisp проектом."
+  (or (locate-dominating-file default-directory "*.asd")
+      (locate-dominating-file default-directory "*.lisp")
+      (locate-dominating-file default-directory "Makefile")))
+
+;; Интеграция с системой сборки ASDF
+(use-package slime-asdf
+  :after slime
+  :config
+  ;; Правильный способ добавления в contribs
+  (with-eval-after-load 'slime
+    (require 'slime-asdf)
+    (unless (memq 'slime-asdf slime-contribs)
+      (setq slime-contribs (cons 'slime-asdf slime-contribs)))))
+
+;; REPL настройки
+(use-package slime-repl
+  :after slime
+  :custom
+  (slime-repl-history-file "~/.emacs.d/slime-history")
+  (slime-repl-history-size 1000)
+  (slime-repl-return-behaviour :send-and-go)
+  :hook (slime-repl-mode . (lambda ()
+                             (company-mode 1)
+                             (paredit-mode 1))))
+
 ;; ----------------- Project management -----------------
 (use-package project
   :ensure nil
@@ -1173,6 +1405,17 @@
 (define-key my-packages-map (kbd "c") 'my/clean-manual-packages)
 (define-key my-packages-map (kbd "f") 'my/fix-problematic-packages)
 
+;; Дополнительные команды для Lisp/SKILL
+(define-prefix-command 'my-lisp-map)
+(global-set-key (kbd "C-c l") 'my-lisp-map)
+(define-key my-lisp-map (kbd "s") 'slime)  ; Запуск SLIME
+(define-key my-lisp-map (kbd "e") 'slime-eval-last-expression)  ; Выполнить выражение
+(define-key my-lisp-map (kbd "b") 'slime-eval-buffer)  ; Выполнить буфер
+(define-key my-lisp-map (kbd "r") 'slime-repl)  ; Открыть REPL
+(define-key my-lisp-map (kbd "c") 'my/cadence-connect)  ; Подключиться к Cadence
+(define-key my-lisp-map (kbd "v") 'my/cadence-run-skill)  ; Выполнить SKILL выражение
+(define-key my-lisp-map (kbd "l") 'my/cadence-load-skill-file)  ; Загрузить SKILL файл
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 15. Завершение инициализации
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1190,7 +1433,8 @@
             ;; Показываем статус пакетов при запуске
             (run-with-timer 1.0 nil 'my/show-packages-status)
             ;; Показываем доступные команды
-            (message "Команды управления пакетами: C-c m [s]татус, [d]ownload, [u]pdate, [c]lean, [f]ix")))
+            (message "Команды управления пакетами: C-c m [s]татус, [d]ownload, [u]pdate, [c]lean, [f]ix")
+            (message "Команды для Lisp/SKILL: C-c l [s]lime, [e]val, [b]uffer, [r]epl, [c]adence")))
 
 ;; Восстанавливаем GC на нормальный уровень
 (add-hook 'emacs-startup-hook

@@ -1,0 +1,2 @@
+;; Generated package description from highlight-parentheses.el  -*- no-byte-compile: t -*-
+(define-package "highlight-parentheses" "2.2.2" "Highlight surrounding parentheses" '((emacs "24.3")) :commit "965b18dd69eff4457e17c9e84b3cbfdbfca2ddfb" :authors '(("Nikolaj Schumacher" . "bugs*nschumde")) :maintainer '("Tassilo Horn" . "tsdh@gnu.org") :keywords '("faces" "matching") :url "https://sr.ht/~tsdh/highlight-parentheses.el/")
