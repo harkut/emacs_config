@@ -592,17 +592,17 @@
 ;; 5. Ассоциации файлов (auto-mode-alist) - РАСШИРЕН ДЛЯ LISP/SKILL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Функция для определения C/C++ заголовочных файлов
-(defun my/c-or-c++-mode ()
-  "Выбор между c-mode и c++-mode на основе содержимого файла."
-  (save-excursion
-    (goto-char (point-min))
-    (if (re-search-forward "^\\(.*\\)\\(.*\\)" nil t)
-        (let ((content (match-string 0)))
-          (if (or (string-match "class\\|namespace\\|template\\|cout\\|cin" content)
-                  (string-match "\\.hpp\\|\\.hh\\|\\.hxx\\'" (buffer-file-name)))
-              'c++-mode
-            'c-mode))
-      'c-mode)))
+;; (defun my/c-or-c++-mode ()
+;;   "Выбор между c-mode и c++-mode на основе содержимого файла."
+;;   (save-excursion
+;;     (goto-char (point-min))
+;;     (if (re-search-forward "^\\(.*\\)\\(.*\\)" nil t)
+;;         (let ((content (match-string 0)))
+;;           (if (or (string-match "class\\|namespace\\|template\\|cout\\|cin" content)
+;;                   (string-match "\\.hpp\\|\\.hh\\|\\.hxx\\'" (buffer-file-name)))
+;;               'c++-mode
+;;             'c-mode))
+;;       'c-mode)))
 
 (setq auto-mode-alist
       (append '(;; Spice Mode
@@ -622,12 +622,12 @@
                 ("\\.cc\\'"    . c++-mode)
                 ("\\.cpp\\'"   . c++-mode)
                 ("\\.cxx\\'"   . c++-mode)
-                ("\\.h\\'"     . my/c-or-c++-mode)  ;; Автоопределение!
                 ("\\.hpp\\'"   . c++-mode)
                 ("\\.hh\\'"    . c++-mode)
                 ("\\.tcc\\'"   . c++-mode)
                 ("\\.icc\\'"   . c++-mode)
                 ("\\.c\\'"     . c-mode)
+		("\\.h\\'"     . c-mode)
                 ;; Flex/Lex файлы (отдельно!)
                 ("\\.l\\'"     . c-mode)  ;; Предполагаем, что это C, если нет flex-mode
                 ;; Lisp и SKILL файлы Cadence
@@ -1439,10 +1439,9 @@
 (define-key my-global-map (kbd "e") my-eaf-map)
 (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
 (define-key my-eaf-map (kbd "g") 'eaf-open-google)
-(define-key my-eaf-map (kbd "m") 'eaf-open-gmail)
-(define-key my-eaf-map (kbd "y") 'eaf-open-youtube)
+(define-key my-eaf-map (kbd "f") 'my/eaf-open-file-manager)
+(define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
 (define-key my-eaf-map (kbd "l") 'eaf-login-google)
-(define-key my-eaf-map (kbd "i") 'eaf-open-google-incognito)
 (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
 (define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
 
@@ -1453,8 +1452,9 @@
 (define-key my-search-map (kbd "f") 'helm-find-files)
 (define-key my-search-map (kbd "p") 'helm-projectile)
 (define-key my-search-map (kbd "r") 'rg-menu)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 15. EAF (Emacs Application Framework) - ИСПРАВЛЕННАЯ КОНФИГУРАЦИЯ
+;; 15. EAF (Emacs Application Framework) - ТОЛЬКО ТЕКСТОВЫЙ БРАУЗЕР
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; Функция для проверки и загрузки EAF
@@ -1486,38 +1486,7 @@
   (unless (file-exists-p eaf-config-location)
     (make-directory (file-name-directory eaf-config-location) t)))
 
-;; Функции для копирования/вставки между Emacs и EAF
-(defun my/eaf-copy-to-clipboard (text)
-  "Копирует текст в системный буфер обмена."
-  (interactive)
-  (when (fboundp 'gui-set-selection)
-    (gui-set-selection 'CLIPBOARD text)
-    (gui-set-selection 'PRIMARY text)
-    (message "Текст скопирован в буфер обмена: %s" (truncate-string-to-width text 50))))
-
-(defun my/eaf-paste-from-clipboard ()
-  "Вставляет текст из системного буфера обмена."
-  (interactive)
-  (when (fboundp 'gui-get-selection)
-    (gui-get-selection 'CLIPBOARD)))
-
-(defun my/copy-to-eaf ()
-  "Копирует выделенный текст Emacs в EAF буфер обмена."
-  (interactive)
-  (let ((text (if (use-region-p)
-                  (buffer-substring-no-properties (region-beginning) (region-end))
-                (current-kill 0))))
-    (my/eaf-copy-to-clipboard text)
-    (message "Скопировано в EAF: %s" (truncate-string-to-width text 50))))
-
-(defun my/paste-from-eaf ()
-  "Вставляет текст из EAF буфера обмена в Emacs."
-  (interactive)
-  (let ((text (my/eaf-paste-from-clipboard)))
-    (when text
-      (insert text))))
-
-;; Команды для быстрого доступа к EAF
+;; Команды для быстрого доступа к EAF браузеру
 (defun eaf-open-browser-wrapper (url)
   "Обертка для eaf-open-browser с проверкой."
   (interactive "sURL: ")
@@ -1529,16 +1498,6 @@
   "Открыть Google."
   (interactive)
   (eaf-open-browser-wrapper "https://www.google.com"))
-
-(defun eaf-open-gmail ()
-  "Открыть Gmail."
-  (interactive)
-  (eaf-open-browser-wrapper "https://mail.google.com"))
-
-(defun eaf-open-youtube ()
-  "Открыть YouTube."
-  (interactive)
-  (eaf-open-browser-wrapper "https://www.youtube.com"))
 
 (defun my/eaf-open-file-manager ()
   "Открыть файловый менеджер EAF."
@@ -1554,7 +1513,7 @@
       (eaf-open "~/" "terminal")
     (message "EAF не загружен")))
 
-;; Функции для решения проблем с Google
+;; Функции для решения проблем с браузером
 (defun eaf-clear-cache ()
   "Очистить кэш EAF."
   (interactive)
@@ -1590,7 +1549,7 @@
     (message "User-agent изменен на: %s" agent)))
 
 (defun eaf-login-google ()
-  "Открыть Google с настройками для входа в аккаунт."
+  "Открыть Google с настройки для входа в аккаунт."
   (interactive)
   (let ((original-user-agent (when (boundp 'eaf-browser-user-agent) eaf-browser-user-agent))
         (original-cookie (when (boundp 'eaf-browser-enable-cookie) eaf-browser-enable-cookie)))
@@ -1627,11 +1586,8 @@
   ;; Привязываем команды EAF к префиксной карте
   (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
   (define-key my-eaf-map (kbd "g") 'eaf-open-google)
-  (define-key my-eaf-map (kbd "m") 'eaf-open-gmail)
-  (define-key my-eaf-map (kbd "y") 'eaf-open-youtube)
   (define-key my-eaf-map (kbd "f") 'my/eaf-open-file-manager)
   (define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
-  (define-key my-eaf-map (kbd "p") 'eaf-open)
   (define-key my-eaf-map (kbd "l") 'eaf-login-google)
   (define-key my-eaf-map (kbd "i") 'eaf-open-google-incognito)
   (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
@@ -1640,21 +1596,15 @@
   ;; Откладываем загрузку модулей и настройку клавиш
   (run-with-timer 3 nil
                   (lambda ()
-                    ;; Автоматическая загрузка модулей EAF
+                    ;; Автоматическая загрузка модулей EAF (только текстовые)
                     (dolist (module '(eaf-browser
                                       eaf-pdf-viewer
-                                      eaf-video-player
                                       eaf-image-viewer
                                       eaf-markdown-previewer
-                                      eaf-music-player
                                       eaf-terminal
                                       eaf-file-manager
-                                      eaf-file-sender
-                                      eaf-mindmap
-                                      eaf-jupyter
                                       eaf-org-previewer
-                                      eaf-rss-reader
-                                      eaf-system-monitor))
+                                      eaf-rss-reader))
                       (condition-case err
                           (progn
                             (require module)
@@ -1675,20 +1625,6 @@
                             eaf-browser-download-path "~/Downloads"))
 
                     (message "Все модули EAF загружены и настроены!"))))
-
-;; Настройка горячих клавиш EAF с использованием with-eval-after-load
-(with-eval-after-load 'eaf
-  ;; Добавляем хук для настройки клавиш при создании буфера EAF
-  (defun my/setup-eaf-keys-hook ()
-    "Настраивает горячие клавиши для текущего буфера EAF."
-    (when (derived-mode-p 'eaf-mode)
-      ;; Локальные клавиши для всех режимов EAF
-      (local-set-key (kbd "C-c c") 'my/copy-to-eaf)
-      (local-set-key (kbd "C-c v") 'my/paste-from-eaf)
-      (local-set-key (kbd "C-c x") 'kill-region)
-      (local-set-key (kbd "C-c a") 'mark-whole-buffer)))
-
-  (add-hook 'eaf-mode-hook 'my/setup-eaf-keys-hook))
 
 ;; Настройка горячих клавиш для браузера EAF
 (with-eval-after-load 'eaf-browser
@@ -1754,11 +1690,11 @@
             ;; Показываем доступные команды
             (message "Команды управления пакетами: C-c g p [s]татус, [d]ownload, [u]pdate, [c]lean, [f]ix")
             (message "Команды для Lisp/SKILL: C-c g l [s]lime, [e]val, [b]uffer, [r]epl, [c]adence")
-            (message "Команды для EAF: C-c g e [b]rowser, [g]oogle, [m]ail, [y]outube, [f]ile-manager")
+            (message "Команды для EAF: C-c g e [b]rowser, [g]oogle, [m]ail, [f]ile-manager")
             (message "Команды поиска: C-c g s [s]earch, [f]iles, [p]roject, [r]g")
             ;; Дополнительная информация
             (when (featurep 'eaf)
-              (message "EAF загружен. Модули будут загружены через 3 секунды..."))))
+              (message "EAF загружен. Будет использоваться только как текстовый браузер."))))
 
 ;; Восстанавливаем GC на нормальный уровень
 (add-hook 'emacs-startup-hook
