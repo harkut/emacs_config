@@ -390,6 +390,15 @@
         (multiple-cursors "https://github.com/magnars/multiple-cursors.el")
         (expand-region "https://github.com/magnars/expand-region.el")))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 0.2 Определение глобальной карты команд
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Создаем глобальную карту команд для пользовательских функций
+(defvar my-global-map (make-sparse-keymap)
+  "Моя глобальная карта команд.")
+
+;; Привязываем глобальную карту команд к C-c g
+(global-set-key (kbd "C-c g") my-global-map) ;; g = Global
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 1. Система пакетов (обновлено)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (require 'package)
@@ -1122,7 +1131,66 @@
       (project-switch-project dir)))
 
   (define-key project-prefix-map (kbd "s") 'my/project-switch-project))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 8.2 MCU Debugging Framework (упрощенная версия)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Загружаем модуль отладки микроконтроллеров
+(load (expand-file-name "mcu-debug.el" user-emacs-directory) t 'nomessage)
 
+;; Основные функции MCU
+(defun my/check-mcu-targets ()
+  "Проверить загруженные цели MCU."
+  (interactive)
+  (if (boundp 'mcu-debug-targets)
+      (if mcu-debug-targets
+          (progn
+            (message "Загружено %d целей:" (length mcu-debug-targets))
+            (dolist (target mcu-debug-targets)
+              (message "  - %s" (car target))))
+        (message "Цели MCU не загружены. Проверьте директорию шаблонов: %s"
+                 mcu-debug-templates-dir))
+    (message "Модуль MCU Debugging не загружен")))
+
+(defun my/check-mcu-dependencies ()
+  "Проверить наличие всех необходимых программ для отладки MCU."
+  (interactive)
+  (message "=== Проверка зависимостей MCU ===")
+  (let* ((tools '(("avr-gcc" . "Компилятор AVR")
+                  ("avr-gdb" . "Отладчик AVR")
+                  ("avrdude" . "Программатор AVR")
+                  ("simavr" . "Симулятор AVR")
+                  ("make" . "Система сборки")))
+         (missing '()))
+    (dolist (tool tools)
+      (let ((name (car tool))
+            (desc (cdr tool)))
+        (if (executable-find name)
+            (message "✓ %s (%s) найден" name desc)
+          (progn
+            (message "✗ %s (%s) НЕ найден" name desc)
+            (push (format "%s (%s)" name desc) missing)))))
+    (if missing
+        (progn
+          (message "\nОтсутствующие программы:")
+          (dolist (m missing)
+            (message "  - %s" m))
+          (message "\nУстановите недостающие программы командой:")
+          (message "sudo apt-get install gcc-avr avr-libc avrdude simavr"))
+      (message "\nВсе зависимости удовлетворены!"))))
+
+;; Добавляем команды в глобальную карту
+(define-key my-global-map (kbd "T") 'my/check-mcu-targets)
+(define-key my-global-map (kbd "D") 'my/check-mcu-dependencies)
+
+;; Сообщение о готовности MCU модуля
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (when (featurep 'mcu-debug)
+              (message "Модуль MCU Debugging готов. Используйте C-c g m для доступа к командам.")
+              (message "  f - прошить (выбор режима debug/release)")
+              (message "  s - запустить симуляцию")
+              (message "  u - отладка через UART")
+              (message "  b - переключить режим сборки"))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 9. Org Mode (Заметки и Задачи в иерархии проекта)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1446,8 +1514,8 @@
 ;; 14.1 Унифицированные префиксные команды (ИСПРАВЛЕННЫЕ)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Основной префикс для пользовательских команд
-(define-prefix-command 'my-global-map)
-(global-set-key (kbd "C-c g") 'my-global-map) ;; g = Global
+;; Привязываем глобальную карту команд к C-c g
+(global-set-key (kbd "C-c g") my-global-map) ;; g = Global
 
 ;; Управление пакетами
 (define-prefix-command 'my-packages-map)
@@ -1726,8 +1794,5 @@
 (add-hook 'emacs-startup-hook
           (lambda ()
             (setq gc-cons-threshold (* 16 1024 1024))))  ; 16MB
-
-;; Загружаем модуль отладки микроконтроллеров
-(load (expand-file-name "mcu-debug.el" user-emacs-directory) t 'nomessage)
 
 (provide 'init)

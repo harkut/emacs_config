@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024 harkut
 ;; Author: harkut <yanovets.vasya@gmail.com>
-;; Version: 1.1
+;; Version: 1.4
 ;; Keywords: embedded, mcu, avr, arm, gdb, debug, release
 
 ;;; Commentary:
@@ -14,7 +14,6 @@
 
 (require 'gdb-mi)
 (require 'compile)
-(require 'project)
 
 (defgroup mcu-debug nil
   "Настройки отладки микроконтроллеров."
@@ -60,8 +59,8 @@
       :uart-args "-c arduino -p atmega328p -P /dev/ttyACM0 -b 115200"
       :elf-suffix ".elf"
       :hex-suffix ".hex"
-      :flash-make-target "flash"
-      :make-targets ("all" "clean" "flash" "fuses" "debug" "release")
+      :flash-make-target-debug "flash"
+      :flash-make-target-release "flash-release"
       :debug-cflags "-g -Og"
       :release-cflags "-Os -flto"
       :memory-map ((flash :start 0x0 :size 0x8000)
@@ -76,8 +75,8 @@
       :uart-args "-c wiring -p atmega2560 -P /dev/ttyACM0 -b 115200"
       :elf-suffix ".elf"
       :hex-suffix ".hex"
-      :flash-make-target "flash"
-      :make-targets ("all" "clean" "flash" "fuses" "debug" "release")
+      :flash-make-target-debug "flash"
+      :flash-make-target-release "flash-release"
       :debug-cflags "-g -Og"
       :release-cflags "-Os -flto"
       :memory-map ((flash :start 0x0 :size 0x40000)
@@ -93,7 +92,6 @@
       :elf-suffix ".elf"
       :hex-suffix ".hex"
       :flash-make-target "flash"
-      :make-targets ("all" "clean" "flash" "debug" "release")
       :debug-cflags "-g -Og"
       :release-cflags "-Os -flto"
       :memory-map ((flash :start 0x08000000 :size 0x100000)
@@ -215,13 +213,9 @@
 
 (defun mcu-debug-build-project (project-dir target-name build-mode)
   "Собрать проект в указанном режиме."
-  (let* ((target (assoc target-name mcu-debug-targets))
-         (plist (cdr target))
-         (make-targets (plist-get plist :make-targets))
-         (build-target (cond
-                        ((member build-mode make-targets) build-mode)
-                        ((string= build-mode "debug") "all")
-                        ((string= build-mode "release") "all")
+  (let* ((build-target (cond
+                        ((string= build-mode "debug") "debug")
+                        ((string= build-mode "release") "release")
                         (t "all"))))
 
     (message "Сборка проекта в режиме %s..." build-mode)
@@ -250,7 +244,9 @@
   "Проверить поддержку режимов сборки в Makefile."
   (let ((makefile (expand-file-name "Makefile" project-dir))
         (has-debug nil)
-        (has-release nil))
+        (has-release nil)
+        (has-flash nil)
+        (has-flash-release nil))
 
     (when (file-exists-p makefile)
       (with-temp-buffer
@@ -258,9 +254,16 @@
         (goto-char (point-min))
         (setq has-debug (re-search-forward "^debug:" nil t))
         (goto-char (point-min))
-        (setq has-release (re-search-forward "^release:" nil t))))
+        (setq has-release (re-search-forward "^release:" nil t))
+        (goto-char (point-min))
+        (setq has-flash (re-search-forward "^flash:" nil t))
+        (goto-char (point-min))
+        (setq has-flash-release (re-search-forward "^flash-release:" nil t))))
 
-    (cons has-debug has-release)))
+    (list :debug has-debug
+          :release has-release
+          :flash has-flash
+          :flash-release has-flash-release)))
 
 ;; ============================================================================
 ;; Запуск симуляторов и отладчиков
@@ -540,7 +543,7 @@ break main
                         (condition-case err
                             (progn
                               (mcu-debug-apply-gdb-layout)
-                              (message "Раскладка окон GDB применена (режим: %s)" build-mode))
+                              (message "Раскладка окон GDB применена (режим: %s" build-mode))
                           (error
                            (message "Не удалось применить раскладку GDB: %s" err)))))
 
@@ -636,7 +639,17 @@ break main
   (let* ((project-dir (mcu-debug-find-project-root))
          (build-mode (mcu-debug-choose-build-mode))
          (plist (mcu-debug-get-target-plist target-name))
-         (flash-target (plist-get plist :flash-make-target "flash")))
+         ;; Выбираем цель прошивки в зависимости от режима сборки
+         (flash-target (cond
+                        ((string= build-mode "debug")
+                         (or (plist-get plist :flash-make-target-debug)
+                             (plist-get plist :flash-make-target)
+                             "flash"))
+                        ((string= build-mode "release")
+                         (or (plist-get plist :flash-make-target-release)
+                             (concat (or (plist-get plist :flash-make-target) "flash") "-release")
+                             "flash-release"))
+                        (t (or (plist-get plist :flash-make-target) "flash")))))
 
     (when (y-or-n-p (format "Собрать проект перед прошивкой в режиме %s?" build-mode))
       (mcu-debug-build-project project-dir target-name build-mode))
@@ -724,11 +737,11 @@ break main
               "   :simulator \"simavr\"\n"
               "   :simulator-args \"-m atmega328 -f 16000000 -g\"\n"
               "   :uart-debugger \"avrdude\"\n"
-              "   :uart-args \"-c arduino -p atmega328p -P /dev/ttyACM0 -b 115200\"\n"
+              "   :uart-args \"-c arduino -p atmega328p -P /dev/ttyACM0 -b 57600\"\n"
               "   :elf-suffix \".elf\"\n"
               "   :hex-suffix \".hex\"\n"
-              "   :flash-make-target \"flash\"\n"
-              "   :make-targets (\"all\" \"clean\" \"flash\" \"fuses\" \"debug\" \"release\")\n"
+              "   :flash-make-target-debug \"flash\"\n"
+              "   :flash-make-target-release \"flash-release\"\n"
               "   :debug-cflags \"-g -Og\"\n"
               "   :release-cflags \"-Os -flto\"))\n\n")
               (format ";; Примеры использования:\n")
@@ -788,25 +801,31 @@ break main
   (define-key mcu-debug-global-map (kbd "U") 'my/unlock-gdb-buffer)
   (define-key mcu-debug-global-map (kbd "C") 'my/gdb-send-command)
 
-  ;; Информация о проекте
+  ;; Информация о проекте (ИСПРАВЛЕННАЯ)
   (define-key mcu-debug-global-map (kbd "p")
     (lambda ()
       (interactive)
-      (let ((project-dir (mcu-debug-find-project-root))
-            (project-name (mcu-debug-get-project-name))
-            (build-support (mcu-debug-check-build-mode-support project-dir)))
-        (message "Проект: %s (%s)\nПоддержка сборки: debug=%s, release=%s"
+      (let* ((project-dir (mcu-debug-find-project-root))
+             (project-name (mcu-debug-get-project-name))
+             (build-support (mcu-debug-check-build-mode-support project-dir)))
+        (message "Проект: %s (%s)\nПоддержка сборки:\n  debug: %s\n  release: %s\n  flash: %s\n  flash-release: %s"
                  project-name project-dir
-                 (if (car build-support) "да" "нет")
-                 (if (cdr build-support) "да" "нет")))))
+                 (if (plist-get build-support :debug) "да" "нет")
+                 (if (plist-get build-support :release) "да" "нет")
+                 (if (plist-get build-support :flash) "да" "нет")
+                 (if (plist-get build-support :flash-release) "да" "нет")))))
 
-  ;; Привязываем к C-c g m
+  ;; Привязываем MCU карту к my-global-map (m для MCU)
+  (when (boundp 'my-global-map)
+    (define-key my-global-map (kbd "m") mcu-debug-global-map))
+
+  ;; Также создаем прямую привязку для удобства
   (global-set-key (kbd "C-c g m") mcu-debug-global-map)
 
   (message "Модуль MCU Debugging инициализирован (%d целей, режим по умолчанию: %s)"
            (length mcu-debug-targets) mcu-debug-default-build-mode))
 
-;; Автоматическая инициализация при загрузке
+;; Автоматическая инициализация при загрузкеy
 (mcu-debug-initialize)
 
 (provide 'mcu-debug)

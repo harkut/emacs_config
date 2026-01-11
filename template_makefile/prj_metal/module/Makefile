@@ -118,7 +118,7 @@ endif
 # ==========================================
 # Основные цели (Rules)
 # ==========================================
-.PHONY: all clean doc flash check help debug release $(OBJ_DIR_MODE) $(BIN_DIR_MODE)
+.PHONY: all clean doc flash flash-release check help debug release $(OBJ_DIR_MODE) $(BIN_DIR_MODE)
 
 # all → зависит от debug (по умолчанию)
 all: debug
@@ -237,9 +237,6 @@ clean-release:
 # ==========================================
 # Статический анализ
 # ==========================================
-# --enable=all - все проверки
-# --suppress=... - подавление ложных срабатываний
-# -I - пути для включения заголовков
 check:
 	@echo "Running static analysis..."
 	$(CHECKER) --enable=all \
