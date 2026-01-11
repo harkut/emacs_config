@@ -1,12 +1,9 @@
 ;;; mcu-debug.el --- MCU Debugging Framework for Embedded Projects -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2024 harkut
-
 ;; Author: harkut <yanovets.vasya@gmail.com>
-;; Version: 1.0
-;; Keywords: embedded, mcu, avr, arm, gdb
-
-;; Этот файл НЕ является частью GNU Emacs.
+;; Version: 1.1
+;; Keywords: embedded, mcu, avr, arm, gdb, debug, release
 
 ;;; Commentary:
 ;; Модуль для отладки микроконтроллеров через GDB с поддержкой
@@ -34,6 +31,11 @@
   :type 'integer
   :group 'mcu-debug)
 
+(defcustom mcu-debug-default-build-mode "debug"
+  "Режим сборки по умолчанию: debug или release."
+  :type '(choice (const "debug") (const "release"))
+  :group 'mcu-debug)
+
 (defcustom mcu-debug-project-root-markers
   '("Makefile" ".git" "Doxyfile")
   "Маркеры корня проекта для автоопределения."
@@ -59,7 +61,9 @@
       :elf-suffix ".elf"
       :hex-suffix ".hex"
       :flash-make-target "flash"
-      :make-targets ("all" "clean" "flash" "fuses")
+      :make-targets ("all" "clean" "flash" "fuses" "debug" "release")
+      :debug-cflags "-g -Og"
+      :release-cflags "-Os -flto"
       :memory-map ((flash :start 0x0 :size 0x8000)
                    (sram  :start 0x100 :size 0x800))))
 
@@ -73,6 +77,9 @@
       :elf-suffix ".elf"
       :hex-suffix ".hex"
       :flash-make-target "flash"
+      :make-targets ("all" "clean" "flash" "fuses" "debug" "release")
+      :debug-cflags "-g -Og"
+      :release-cflags "-Os -flto"
       :memory-map ((flash :start 0x0 :size 0x40000)
                    (sram  :start 0x200 :size 0x2000))))
 
@@ -86,6 +93,9 @@
       :elf-suffix ".elf"
       :hex-suffix ".hex"
       :flash-make-target "flash"
+      :make-targets ("all" "clean" "flash" "debug" "release")
+      :debug-cflags "-g -Og"
+      :release-cflags "-Os -flto"
       :memory-map ((flash :start 0x08000000 :size 0x100000)
                    (ram   :start 0x20000000 :size 0x30000)))))
   "Встроенные конфигурации для популярных микроконтроллеров.")
@@ -111,19 +121,49 @@
   "Получить имя проекта из текущей директории."
   (file-name-nondirectory (directory-file-name (mcu-debug-find-project-root))))
 
-(defun mcu-debug-find-elf-file (project-dir target-name)
-  "Найти ELF файл в директории проекта."
+(defun mcu-debug-find-elf-file (project-dir target-name build-mode)
+  "Найти ELF файл в директории проекта для указанного режима сборки."
   (let* ((target (assoc target-name mcu-debug-targets))
          (plist (cdr target))
          (elf-suffix (or (plist-get plist :elf-suffix) ".elf"))
-         (bin-dir (expand-file-name "bin" project-dir))
-         (elf-files (when (file-exists-p bin-dir)
-                      (directory-files bin-dir t (concat "\\" elf-suffix "$")))))
+         ;; Ищем ELF в поддиректориях по режиму сборки
+         (debug-dir (expand-file-name "debug" (expand-file-name "bin" project-dir)))
+         (release-dir (expand-file-name "release" (expand-file-name "bin" project-dir)))
+         (elf-files '()))
+
+    ;; Сначала ищем в режимной поддиректории
+    (setq elf-files
+          (cond
+           ((string= build-mode "debug")
+            (when (file-exists-p debug-dir)
+              (directory-files debug-dir t (concat "\\" elf-suffix "$"))))
+           ((string= build-mode "release")
+            (when (file-exists-p release-dir)
+              (directory-files release-dir t (concat "\\" elf-suffix "$"))))))
+
+    ;; Если не нашли в поддиректориях, ищем в корне bin
+    (when (null elf-files)
+      (let ((bin-dir (expand-file-name "bin" project-dir)))
+        (when (file-exists-p bin-dir)
+          ;; Фильтруем файлы по имени, включая режим сборки
+          (setq elf-files (directory-files bin-dir t (concat ".*"
+                                                             (if (string= build-mode "debug")
+                                                                 "-debug"
+                                                               "-release")
+                                                             "\\" elf-suffix "$"))))))
+
+    ;; Если все еще не нашли, берем любой ELF файл
+    (when (null elf-files)
+      (let ((bin-dir (expand-file-name "bin" project-dir)))
+        (when (file-exists-p bin-dir)
+          (setq elf-files (directory-files bin-dir t (concat "\\" elf-suffix "$"))))))
+
     (cond
      ((= (length elf-files) 1) (car elf-files))
      ((> (length elf-files) 1)
       (completing-read "Выберите ELF файл: " elf-files nil t))
-     (t (error "ELF файл не найден в %s. Соберите проект командой 'make all'" bin-dir)))))
+     (t (error "ELF файл не найден в %s. Соберите проект командой 'make %s' или 'make all'"
+               (expand-file-name "bin" project-dir) build-mode)))))
 
 (defun mcu-debug-get-makefile-targets (project-dir)
   "Получить список целей из Makefile проекта."
@@ -163,6 +203,64 @@
     (unless (executable-find gdb-exe)
       (error "GDB не найден: %s. Установите пакет с компилятором для этой архитектуры." gdb-exe))
     gdb-exe))
+
+;; ============================================================================
+;; Управление режимами сборки
+;; ============================================================================
+
+(defun mcu-debug-choose-build-mode ()
+  "Выбрать режим сборки (debug или release)."
+  (completing-read "Режим сборки: " '("debug" "release") nil t
+                   mcu-debug-default-build-mode))
+
+(defun mcu-debug-build-project (project-dir target-name build-mode)
+  "Собрать проект в указанном режиме."
+  (let* ((target (assoc target-name mcu-debug-targets))
+         (plist (cdr target))
+         (make-targets (plist-get plist :make-targets))
+         (build-target (cond
+                        ((member build-mode make-targets) build-mode)
+                        ((string= build-mode "debug") "all")
+                        ((string= build-mode "release") "all")
+                        (t "all"))))
+
+    (message "Сборка проекта в режиме %s..." build-mode)
+
+    (let ((cmd (format "make -C %s BUILD_MODE=%s %s"
+                       (shell-quote-argument project-dir)
+                       build-mode
+                       build-target))
+          (compilation-buffer-name "*MCU Build*"))
+
+      (with-current-buffer (get-buffer-create compilation-buffer-name)
+        (erase-buffer)
+        (compilation-mode))
+
+      (compile cmd)
+
+      ;; Ждем завершения сборки
+      (let ((proc (get-buffer-process compilation-buffer-name)))
+        (when proc
+          (while (eq (process-status proc) 'run)
+            (sleep-for 0.1))))
+
+      (message "Сборка завершена в режиме %s" build-mode))))
+
+(defun mcu-debug-check-build-mode-support (project-dir)
+  "Проверить поддержку режимов сборки в Makefile."
+  (let ((makefile (expand-file-name "Makefile" project-dir))
+        (has-debug nil)
+        (has-release nil))
+
+    (when (file-exists-p makefile)
+      (with-temp-buffer
+        (insert-file-contents makefile)
+        (goto-char (point-min))
+        (setq has-debug (re-search-forward "^debug:" nil t))
+        (goto-char (point-min))
+        (setq has-release (re-search-forward "^release:" nil t))))
+
+    (cons has-debug has-release)))
 
 ;; ============================================================================
 ;; Запуск симуляторов и отладчиков
@@ -234,13 +332,15 @@
   ;; Закрываем GDB буферы
   (when (get-buffer "*gud*")
     (kill-buffer "*gud*"))
+  (when (get-buffer "*MCU Build*")
+    (kill-buffer "*MCU Build*"))
   (message "Все процессы MCU отладки остановлены"))
 
 ;; ============================================================================
 ;; Построение команд GDB
 ;; ============================================================================
 
-(defun mcu-debug-build-gdb-init-script (project-dir elf-file sim-mode)
+(defun mcu-debug-build-gdb-init-script (project-dir elf-file sim-mode build-mode)
   "Создать скрипт инициализации для GDB в директории проекта."
   (let* ((port (if sim-mode 1234 mcu-debug-default-uart-port))
          ;; Создаем скрипт в директории проекта
@@ -251,6 +351,7 @@
          (commands (format "
 # Автоматический скрипт инициализации GDB для MCU отладки
 # Создан %s
+# Режим сборки: %s
 
 # Устанавливаем параметры
 set confirm off
@@ -266,20 +367,26 @@ directory \"%s\"
 # Устанавливаем точку останова на main
 break main
 
+# Предупреждение для release режима
+%s
 # Комментарии для пользователя:
 # Используйте Ctrl+C для прерывания
 # Ctrl+Z для паузы
 # 'step', 'next', 'continue' для управления выполнением
-" (current-time-string) full-elf-path port full-project-path)))
+" (current-time-string) build-mode
+                          full-elf-path port full-project-path
+                          (if (string= build-mode "release")
+                              "echo \"ВНИМАНИЕ: Режим RELEASE. Отладочная информация ограничена.\""
+                            ""))))
 
     (with-temp-file script-file
       (insert commands))
 
-    (message "Создан скрипт GDB: %s" script-file)
+    (message "Создан скрипт GDB для режима %s: %s" build-mode script-file)
     script-file))
 
 ;; ============================================================================
-;; Настройка окон GDB (аналогичная my/apply-gdb-layout из init.el)
+;; Настройка окон GDB
 ;; ============================================================================
 
 (defun mcu-debug-get-gdb-buffer-by-mode (mode)
@@ -378,17 +485,17 @@ break main
 ;; Основные функции отладки
 ;; ============================================================================
 
-(defun mcu-debug-launch-gdb-session (project-dir target-name sim-mode)
+(defun mcu-debug-launch-gdb-session (project-dir target-name sim-mode build-mode)
   "Запустить сессию GDB для отладки MCU."
-  (let* ((elf-file (mcu-debug-find-elf-file project-dir target-name))
-         (gdb-init-script (mcu-debug-build-gdb-init-script project-dir elf-file sim-mode))
+  (let* ((elf-file (mcu-debug-find-elf-file project-dir target-name build-mode))
+         (gdb-init-script (mcu-debug-build-gdb-init-script project-dir elf-file sim-mode build-mode))
          (gdb-exe (mcu-debug-ensure-gdb-executable target-name))
          (gdb-cmd (format "%s --interpreter=mi -x %s" gdb-exe gdb-init-script)))
 
-    (message "Запуск GDB с командой: %s" gdb-cmd)
+    (message "Запуск GDB в режиме %s с командой: %s" build-mode gdb-cmd)
 
     ;; Создаем отдельный фрейм для отладки
-    (let ((debug-frame (make-frame `((name . ,(format "MCU-DEBUG-%s" target-name))
+    (let ((debug-frame (make-frame `((name . ,(format "MCU-DEBUG-%s-%s" target-name build-mode))
                                      (width . 200)
                                      (height . 85)
                                      (left . 1200)
@@ -423,7 +530,7 @@ break main
                               ;; Настраиваем клавиши
                               (local-set-key (kbd "C-c C-c") 'gdb-gud-control-c)
                               (local-set-key (kbd "C-c C-z") 'gdb-gud-control-z)
-                              (message "Буфер GDB настроен для интерактивного ввода"))))))
+                              (message "Буфер GDB настроен для интерактивного ввода (режим: %s)" build-mode))))))
 
       ;; Применяем раскладку окон через 3 секунды, чтобы GDB успел создать буферы
       (run-with-timer 3 nil
@@ -433,7 +540,7 @@ break main
                         (condition-case err
                             (progn
                               (mcu-debug-apply-gdb-layout)
-                              (message "Раскладка окон GDB применена"))
+                              (message "Раскладка окон GDB применена (режим: %s)" build-mode))
                           (error
                            (message "Не удалось применить раскладку GDB: %s" err)))))
 
@@ -443,7 +550,8 @@ break main
                         (when (file-exists-p gdb-init-script)
                           (delete-file gdb-init-script))))
 
-      (message "Сессия GDB запущена для %s. Используйте буфер *gud* для команд." target-name))))
+      (message "Сессия GDB запущена для %s в режиме %s. Используйте буфер *gud* для команд."
+               target-name build-mode))))
 
 ;;;###autoload
 (defun mcu-debug-start-simulation (target-name)
@@ -454,20 +562,22 @@ break main
                           nil t "AVR-ATMega328")))
 
   (let* ((project-dir (mcu-debug-find-project-root))
-         (elf-file (mcu-debug-find-elf-file project-dir target-name)))
+         (build-mode (mcu-debug-choose-build-mode))
+         (elf-file (mcu-debug-find-elf-file project-dir target-name build-mode)))
 
     (unless (file-exists-p elf-file)
-      (if (y-or-n-p (format "ELF файл %s не найден. Собрать проект?" (file-name-nondirectory elf-file)))
+      (if (y-or-n-p (format "ELF файл %s не найден в режиме %s. Собрать проект?"
+                            (file-name-nondirectory elf-file) build-mode))
           (progn
-            (compile "make -k all")
+            (mcu-debug-build-project project-dir target-name build-mode)
             (sleep-for 2)
             (unless (file-exists-p elf-file)
-              (error "Проект не собран. Проверьте Makefile и компилятор")))
+              (error "Проект не собран в режиме %s. Проверьте Makefile и компилятор" build-mode)))
         (error "Отмена: ELF файл не найден")))
 
     (mcu-debug-stop-all-processes)
 
-    (message "Запуск симуляции для %s..." target-name)
+    (message "Запуск симуляции для %s в режиме %s..." target-name build-mode)
 
     ;; Запускаем симулятор
     (unless (mcu-debug-launch-simulator-simple elf-file)
@@ -475,7 +585,7 @@ break main
 
     ;; Запускаем GDB через 2 секунды
     (run-with-timer 2 nil (lambda ()
-                            (mcu-debug-launch-gdb-session project-dir target-name t)))))
+                            (mcu-debug-launch-gdb-session project-dir target-name t build-mode)))))
 
 ;;;###autoload
 (defun mcu-debug-start-uart-debug (target-name)
@@ -486,20 +596,22 @@ break main
                           nil t "AVR-ATMega328")))
 
   (let* ((project-dir (mcu-debug-find-project-root))
-         (elf-file (mcu-debug-find-elf-file project-dir target-name)))
+         (build-mode (mcu-debug-choose-build-mode))
+         (elf-file (mcu-debug-find-elf-file project-dir target-name build-mode)))
 
     (unless (file-exists-p elf-file)
-      (if (y-or-n-p (format "ELF файл %s не найден. Собрать проект?" (file-name-nondirectory elf-file)))
+      (if (y-or-n-p (format "ELF файл %s не найден в режиме %s. Собрать проект?"
+                            (file-name-nondirectory elf-file) build-mode))
           (progn
-            (compile "make -k all")
+            (mcu-debug-build-project project-dir target-name build-mode)
             (sleep-for 2)
             (unless (file-exists-p elf-file)
-              (error "Проект не собран. Проверьте Makefile и компилятор")))
+              (error "Проект не собран в режиме %s. Проверьте Makefile и компилятор" build-mode)))
         (error "Отмена: ELF файл не найден")))
 
     (mcu-debug-stop-all-processes)
 
-    (message "Запуск UART отладки для %s..." target-name)
+    (message "Запуск UART отладки для %s в режиме %s..." target-name build-mode)
 
     ;; Запускаем UART отладчик
     (unless (mcu-debug-launch-uart-debugger target-name)
@@ -507,7 +619,7 @@ break main
 
     ;; Запускаем GDB через 3 секунды
     (run-with-timer 3 nil (lambda ()
-                            (mcu-debug-launch-gdb-session project-dir target-name nil)))))
+                            (mcu-debug-launch-gdb-session project-dir target-name nil build-mode)))))
 
 ;; ============================================================================
 ;; Вспомогательные функции
@@ -522,14 +634,16 @@ break main
                           nil t "AVR-ATMega328")))
 
   (let* ((project-dir (mcu-debug-find-project-root))
+         (build-mode (mcu-debug-choose-build-mode))
          (plist (mcu-debug-get-target-plist target-name))
          (flash-target (plist-get plist :flash-make-target "flash")))
 
-    (when (y-or-n-p "Собрать проект перед прошивкой?")
-      (compile "make -k all"))
+    (when (y-or-n-p (format "Собрать проект перед прошивкой в режиме %s?" build-mode))
+      (mcu-debug-build-project project-dir target-name build-mode))
 
-    (let ((cmd (format "make -C %s %s"
+    (let ((cmd (format "make -C %s BUILD_MODE=%s %s"
                        (shell-quote-argument project-dir)
+                       build-mode
                        flash-target)))
       (compile cmd))))
 
@@ -539,13 +653,25 @@ break main
   (interactive)
 
   (let* ((project-dir (mcu-debug-find-project-root))
+         (build-mode (mcu-debug-choose-build-mode))
          (targets (mcu-debug-get-makefile-targets project-dir))
          (make-target (completing-read "Цель Makefile: " targets nil t)))
 
-    (let ((cmd (format "make -C %s %s"
+    (let ((cmd (format "make -C %s BUILD_MODE=%s %s"
                        (shell-quote-argument project-dir)
+                       build-mode
                        make-target)))
       (compile cmd))))
+
+;;;###autoload
+(defun mcu-debug-switch-build-mode ()
+  "Переключить режим сборки между debug и release."
+  (interactive)
+  (setq mcu-debug-default-build-mode
+        (if (string= mcu-debug-default-build-mode "debug")
+            "release"
+          "debug"))
+  (message "Режим сборки изменен на: %s" mcu-debug-default-build-mode))
 
 ;; ============================================================================
 ;; Утилиты для работы с буфером GDB
@@ -601,7 +727,10 @@ break main
               "   :uart-args \"-c arduino -p atmega328p -P /dev/ttyACM0 -b 115200\"\n"
               "   :elf-suffix \".elf\"\n"
               "   :hex-suffix \".hex\"\n"
-              "   :flash-make-target \"flash\"))\n\n")
+              "   :flash-make-target \"flash\"\n"
+              "   :make-targets (\"all\" \"clean\" \"flash\" \"fuses\" \"debug\" \"release\")\n"
+              "   :debug-cflags \"-g -Og\"\n"
+              "   :release-cflags \"-Os -flto\"))\n\n")
               (format ";; Примеры использования:\n")
               (format ";; (mcu-debug-start-simulation \"%s\")\n" target-name)
               (format ";; (mcu-debug-start-uart-debug \"%s\")\n" target-name)
@@ -653,6 +782,7 @@ break main
   (define-key mcu-debug-global-map (kbd "g") 'mcu-debug-generate-template)
   (define-key mcu-debug-global-map (kbd "l") 'mcu-debug-load-all-templates)
   (define-key mcu-debug-global-map (kbd "k") 'mcu-debug-stop-all-processes)
+  (define-key mcu-debug-global-map (kbd "b") 'mcu-debug-switch-build-mode)
 
   ;; Утилиты для работы с GDB
   (define-key mcu-debug-global-map (kbd "U") 'my/unlock-gdb-buffer)
@@ -664,20 +794,17 @@ break main
       (interactive)
       (let ((project-dir (mcu-debug-find-project-root))
             (project-name (mcu-debug-get-project-name))
-            (elf-files (directory-files
-                        (expand-file-name "bin" project-dir)
-                        t "\\.elf$")))
-        (message "Проект: %s (%s)\nELF файлы: %s"
+            (build-support (mcu-debug-check-build-mode-support project-dir)))
+        (message "Проект: %s (%s)\nПоддержка сборки: debug=%s, release=%s"
                  project-name project-dir
-                 (if elf-files
-                     (mapconcat 'file-name-nondirectory elf-files ", ")
-                   "нет")))))
+                 (if (car build-support) "да" "нет")
+                 (if (cdr build-support) "да" "нет")))))
 
   ;; Привязываем к C-c g m
   (global-set-key (kbd "C-c g m") mcu-debug-global-map)
 
-  (message "Модуль MCU Debugging инициализирован (%d целей)"
-           (length mcu-debug-targets)))
+  (message "Модуль MCU Debugging инициализирован (%d целей, режим по умолчанию: %s)"
+           (length mcu-debug-targets) mcu-debug-default-build-mode))
 
 ;; Автоматическая инициализация при загрузке
 (mcu-debug-initialize)
