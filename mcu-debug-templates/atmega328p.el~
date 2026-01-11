@@ -1,0 +1,14 @@
+;; Конфигурация для atmega328p
+
+(mcu-debug-register-target
+ "atmega328p"
+ '(:gdb-executable "avr-gdb"
+   :gdb-args ""
+   :simulator "simavr"
+   :simulator-args "-g -m atmega328p"
+   :uart-debugger "avrdude"
+   :uart-args "-c arduino -p atmega328p -P /dev/ttyACM0 -b 115200"
+   :elf-suffix ".elf"
+   :hex-suffix ".hex"
+   :flash-make-target "flash"))
+

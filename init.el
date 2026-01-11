@@ -1,12 +1,13 @@
-;;; init.el
+;; init.el
 
-;;; Code:
+;; Code:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 0. Безопасность и производительность
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (setq debug-on-error t)
 (message "Начинаем загрузку конфигурации...")
+(require 'make-mode)
 
 ;; Ускорение package.el: отключаем проверки и обновления при старте
 (setq package-check-signature nil
@@ -627,7 +628,7 @@
                 ("\\.tcc\\'"   . c++-mode)
                 ("\\.icc\\'"   . c++-mode)
                 ("\\.c\\'"     . c-mode)
-		("\\.h\\'"     . c-mode)
+		            ("\\.h\\'"     . c-mode)
                 ;; Flex/Lex файлы (отдельно!)
                 ("\\.l\\'"     . c-mode)  ;; Предполагаем, что это C, если нет flex-mode
                 ;; Lisp и SKILL файлы Cadence
@@ -781,7 +782,41 @@
 (use-package yaml-mode
   :mode (("\\.yml\\'" . yaml-mode)
          ("\\.yaml\\'" . yaml-mode)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 7.5 Makefile Mode (окончательная рабочая версия)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Явно загружаем встроенный модуль make-mode
+(require 'make-mode)
 
+;; Устанавливаем ассоциации файлов
+(add-to-list 'auto-mode-alist '("\\.mk\\'" . makefile-gmake-mode))
+(add-to-list 'auto-mode-alist '("Makefile\\'" . makefile-gmake-mode))
+(add-to-list 'auto-mode-alist '("Makefile\\.inc\\'" . makefile-gmake-mode))
+(add-to-list 'auto-mode-alist '("\\.make\\'" . makefile-gmake-mode))
+
+;; Базовая настройка без пользовательской подсветки
+(defun my/makefile-simple-setup ()
+  "Минимальная настройка для режима Makefile."
+  (setq-local indent-tabs-mode t)   ; Makefile требует табы
+  (setq-local tab-width 8)
+  (setq-local comment-start "# ")
+  (setq-local comment-end "")
+
+  ;; Используем встроенную подсветку, а не пользовательскую
+  (setq-local font-lock-keywords-only t)
+
+  ;; Простая вставка таба
+  (local-set-key (kbd "TAB") (lambda () (interactive) (insert "\t")))
+
+  ;; Полезные горячие клавиши
+  (local-set-key (kbd "C-c C-c") (lambda () (interactive) (compile "make")))
+  (local-set-key (kbd "C-c C-k") (lambda () (interactive) (compile "make clean")))
+  (local-set-key (kbd "C-c C-s") (lambda () (interactive) (compile "make -n")))
+
+  (message "Makefile mode ready (using built-in highlighting)"))
+
+;; Хук для настройки
+(add-hook 'makefile-gmake-mode-hook 'my/makefile-simple-setup)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 8. Инструменты (GDB, Doxymacs, LSP, Flycheck)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1434,16 +1469,16 @@
 (define-key my-lisp-map (kbd "v") 'my/cadence-run-skill)
 (define-key my-lisp-map (kbd "f") 'my/cadence-load-skill-file)
 
-;; EAF управление
-(define-prefix-command 'my-eaf-map)
-(define-key my-global-map (kbd "e") my-eaf-map)
-(define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
-(define-key my-eaf-map (kbd "g") 'eaf-open-google)
-(define-key my-eaf-map (kbd "f") 'my/eaf-open-file-manager)
-(define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
-(define-key my-eaf-map (kbd "l") 'eaf-login-google)
-(define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
-(define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
+;; ;; EAF управление
+;; (define-prefix-command 'my-eaf-map)
+;; (define-key my-global-map (kbd "e") my-eaf-map)
+;; (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
+;; (define-key my-eaf-map (kbd "g") 'eaf-open-google)
+;; (define-key my-eaf-map (kbd "f") 'my/eaf-open-file-manager)
+;; (define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
+;; (define-key my-eaf-map (kbd "l") 'eaf-login-google)
+;; (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
+;; (define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
 
 ;; Поиск
 (define-prefix-command 'my-search-map)
@@ -1457,274 +1492,23 @@
 ;; 15. EAF (Emacs Application Framework) - ТОЛЬКО ТЕКСТОВЫЙ БРАУЗЕР
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Функция для проверки и загрузки EAF
-(defun my/ensure-eaf-loaded ()
-  "Проверяет и загружает EAF с настройками."
-  (let ((eaf-dir "~/.emacs.d/site-lisp/emacs-application-framework"))
-    (if (not (file-directory-p eaf-dir))
-        (progn
-          (message "EAF не найден в %s. Установите его вручную." eaf-dir)
-          nil)
-      (add-to-list 'load-path eaf-dir)
-      (condition-case err
-          (progn
-            (require 'eaf)
-            (message "EAF базовая загрузка успешна")
-            t)
-        (error
-         (message "Ошибка загрузки EAF: %s" err)
-         nil)))))
-
-;; Основные настройки EAF (вызываются сразу после загрузки)
-(defun my/setup-eaf-basic ()
-  "Настраивает основные параметры EAF."
-  (setq eaf-python-command "python3"
-        eaf-start-python-process-when-require t
-        eaf-config-location "~/.emacs.d/eaf-config.el")
-
-  ;; Убедимся что директория для конфигурации существует
-  (unless (file-exists-p eaf-config-location)
-    (make-directory (file-name-directory eaf-config-location) t)))
-
-;; Команды для быстрого доступа к EAF браузеру
-(defun eaf-open-browser-wrapper (url)
-  "Обертка для eaf-open-browser с проверкой."
-  (interactive "sURL: ")
-  (if (fboundp 'eaf-open-browser)
-      (eaf-open-browser url)
-    (message "Функция eaf-open-browser не определена. Перезагрузите Emacs.")))
-
-(defun eaf-open-google ()
-  "Открыть Google."
-  (interactive)
-  (eaf-open-browser-wrapper "https://www.google.com"))
-
-(defun my/eaf-open-file-manager ()
-  "Открыть файловый менеджер EAF."
-  (interactive)
-  (if (fboundp 'eaf-open)
-      (eaf-open "~/" "file-manager")
-    (message "EAF не загружен")))
-
-(defun my/eaf-open-terminal ()
-  "Открыть терминал EAF."
-  (interactive)
-  (if (fboundp 'eaf-open)
-      (eaf-open "~/" "terminal")
-    (message "EAF не загружен")))
-
-;; Функции для решения проблем с браузером
-(defun eaf-clear-cache ()
-  "Очистить кэш EAF."
-  (interactive)
-  (shell-command "rm -rf ~/.emacs.d/eaf/* 2>/dev/null")
-  (message "Кэш EAF очищен"))
-
-(defun eaf-switch-user-agent (agent)
-  "Переключить user-agent браузера."
-  (interactive
-   (list (completing-read "Выберите user-agent: "
-                          '("Chrome Windows"
-                            "Chrome Linux"
-                            "Firefox Windows"
-                            "Firefox Linux"
-                            "Safari Mac"
-                            "Edge Windows"))))
-  (when (boundp 'eaf-browser-user-agent)
-    (setq eaf-browser-user-agent
-          (cond
-           ((equal agent "Chrome Windows")
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-           ((equal agent "Chrome Linux")
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-           ((equal agent "Firefox Windows")
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/120.0")
-           ((equal agent "Firefox Linux")
-            "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/120.0")
-           ((equal agent "Safari Mac")
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15")
-           ((equal agent "Edge Windows")
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0")
-           (t eaf-browser-user-agent)))
-    (message "User-agent изменен на: %s" agent)))
-
-(defun eaf-login-google ()
-  "Открыть Google с настройки для входа в аккаунт."
-  (interactive)
-  (let ((original-user-agent (when (boundp 'eaf-browser-user-agent) eaf-browser-user-agent))
-        (original-cookie (when (boundp 'eaf-browser-enable-cookie) eaf-browser-enable-cookie)))
-
-    ;; Устанавливаем настройки для Google
-    (when (boundp 'eaf-browser-user-agent)
-      (setq eaf-browser-user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"))
-
-    (when (boundp 'eaf-browser-enable-cookie)
-      (setq eaf-browser-enable-cookie t))
-
-    ;; Открываем Google
-    (eaf-open-browser-wrapper "https://accounts.google.com")
-
-    ;; Восстанавливаем настройки через 10 секунд
-    (run-with-timer 10 nil
-                    (lambda ()
-                      (when (and (boundp 'eaf-browser-user-agent) original-user-agent)
-                        (setq eaf-browser-user-agent original-user-agent))
-                      (when (and (boundp 'eaf-browser-enable-cookie) original-cookie)
-                        (setq eaf-browser-enable-cookie original-cookie))
-                      (message "Настройки EAF восстановлены")))))
-
-(defun eaf-open-google-incognito ()
-  "Открыть Google в 'инкогнито' режиме (с очищенным кэшем)."
-  (interactive)
-  (eaf-clear-cache)
-  (eaf-open-browser-wrapper "https://www.google.com"))
-
-;; Пробуем загрузить EAF при старте
-(when (my/ensure-eaf-loaded)
-  (my/setup-eaf-basic)
-
-  ;; Привязываем команды EAF к префиксной карте
-  (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
-  (define-key my-eaf-map (kbd "g") 'eaf-open-google)
-  (define-key my-eaf-map (kbd "f") 'my/eaf-open-file-manager)
-  (define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
-  (define-key my-eaf-map (kbd "l") 'eaf-login-google)
-  (define-key my-eaf-map (kbd "i") 'eaf-open-google-incognito)
-  (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
-  (define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
-
-  ;; Откладываем загрузку модулей и настройку клавиш
-  (run-with-timer 3 nil
-                  (lambda ()
-                    ;; Автоматическая загрузка модулей EAF (только текстовые)
-                    (dolist (module '(eaf-browser
-                                      eaf-pdf-viewer
-                                      eaf-image-viewer
-                                      eaf-markdown-previewer
-                                      eaf-terminal
-                                      eaf-file-manager
-                                      eaf-org-previewer
-                                      eaf-rss-reader))
-                      (condition-case err
-                          (progn
-                            (require module)
-                            (message "EAF модуль %s загружен" module))
-                        (error
-                         (message "Не удалось загрузить модуль %s: %s" module err))))
-
-                    ;; Настройка параметров после загрузки модулей
-                    (when (boundp 'eaf-browser-user-agent)
-                      (setq eaf-browser-user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                            eaf-browser-enable-javascript t
-                            eaf-browser-enable-cookie t
-                            eaf-browser-remember-history t
-                            eaf-browser-enable-password t
-                            eaf-browser-continue-where-left-off t
-                            eaf-browser-enable-adblocker t
-                            eaf-browser-default-zoom 1.0
-                            eaf-browser-download-path "~/Downloads"))
-
-                    (message "Все модули EAF загружены и настроены!"))))
-
-;; Настройка горячих клавиш для браузера EAF
-(with-eval-after-load 'eaf-browser
-  ;; Добавляем хук для настройки клавиш браузера
-  (defun my/setup-eaf-browser-keys-hook ()
-    "Настраивает горячие клавиши для браузера EAF."
-    (when (derived-mode-p 'eaf-browser-mode)
-      ;; Перенос строки по Shift+RET
-      (local-set-key (kbd "<S-return>") (lambda () (interactive)
-                                          (eaf-call-async "execute_function" eaf--buffer-id "insert_newline")))
-
-      ;; Основные клавиши навигации
-      (local-set-key (kbd "M-<left>") 'eaf-browser-history-back)
-      (local-set-key (kbd "M-<right>") 'eaf-browser-history-forward)
-      (local-set-key (kbd "C-<left>") 'eaf-browser-history-back)
-      (local-set-key (kbd "C-<right>") 'eaf-browser-history-forward)
-      (local-set-key (kbd "C-c b") 'eaf-browser-history-back)
-      (local-set-key (kbd "C-c f") 'eaf-browser-history-forward)
-
-      ;; Масштабирование
-      (local-set-key (kbd "C--") 'eaf-browser-zoom-out)
-      (local-set-key (kbd "C-=") 'eaf-browser-zoom-in)
-      (local-set-key (kbd "C-0") 'eaf-browser-zoom-reset)
-
-      ;; Управление вкладками
-      (local-set-key (kbd "C-x t") 'eaf-create-blank-tab)
-      (local-set-key (kbd "C-x k") 'eaf-close-tab)
-      (local-set-key (kbd "C-x <right>") 'eaf-next-tab)
-      (local-set-key (kbd "C-x <left>") 'eaf-prev-tab)
-
-      ;; Прокрутка
-      (local-set-key (kbd "C-v") 'eaf-browser-scroll-up)
-      (local-set-key (kbd "M-v") 'eaf-browser-scroll-down)
-      (local-set-key (kbd "C-x >") 'eaf-browser-scroll-right)
-      (local-set-key (kbd "C-x <") 'eaf-browser-scroll-left)
-
-      ;; Поиск
-      (local-set-key (kbd "C-s") 'eaf-browser-search-text)
-      (local-set-key (kbd "C-r") 'eaf-browser-clear-search)
-
-      ;; Обновление
-      (local-set-key (kbd "F5") 'eaf-browser-refresh)
-      (local-set-key (kbd "C-x r") 'eaf-browser-refresh)
-      (local-set-key (kbd "C-x d") 'eaf-browser-toggle-dark-mode)))
-
-  (add-hook 'eaf-browser-mode-hook 'my/setup-eaf-browser-keys-hook))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 16. Завершение инициализации
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Загружаем кастомные настройки если есть
-(when (file-exists-p "~/.emacs.d/local.el")
-  (load-file "~/.emacs.d/local.el"))
-
-;; Сообщение о готовности
-(add-hook 'emacs-startup-hook
-          (lambda ()
-            (message "Emacs готов! Загрузка заняла %.2f секунд"
-                     (float-time (time-subtract after-init-time before-init-time)))
-            ;; Исправляем структуру проблемных пакетов
-            (run-with-timer 0.5 nil 'my/fix-problematic-packages)
-            ;; Показываем статус пакетов при запуске
-            (run-with-timer 1.0 nil 'my/show-packages-status)
-            ;; Показываем доступные команды
-            (message "Команды управления пакетами: C-c g p [s]татус, [d]ownload, [u]pdate, [c]lean, [f]ix")
-            (message "Команды для Lisp/SKILL: C-c g l [s]lime, [e]val, [b]uffer, [r]epl, [c]adence")
-            (message "Команды для EAF: C-c g e [b]rowser, [g]oogle, [m]ail, [f]ile-manager")
-            (message "Команды поиска: C-c g s [s]earch, [f]iles, [p]roject, [r]g")
-            ;; Дополнительная информация
-            (when (featurep 'eaf)
-              (message "EAF загружен. Будет использоваться только как текстовый браузер."))))
-
-;; Восстанавливаем GC на нормальный уровень
-(add-hook 'emacs-startup-hook
-          (lambda ()
-            (setq gc-cons-threshold (* 16 1024 1024))))  ; 16MB
-
-(provide 'init)
-;;; init.el ends here
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; ;; 15. EAF (Emacs Application Framework) - ИСПРАВЛЕННАЯ КОНФИГУРАЦИЯ
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ;; Функция для проверки и загрузки EAF
 ;; (defun my/ensure-eaf-loaded ()
 ;;   "Проверяет и загружает EAF с настройками."
-;;   (let ((possible-paths '("~/.emacs.d/site-lisp/emacs-application-framework"
-;;                          "~/.emacs.d/emacs-application-framework"
-;;                          "~/emacs-application-framework"
-;;                          "/usr/share/emacs/site-lisp/emacs-application-framework")))
-;;     (catch 'found
-;;       (dolist (eaf-dir possible-paths)
-;;         (when (file-directory-p eaf-dir)
-;;           (add-to-list 'load-path eaf-dir)
-;;           (condition-case err
-;;               (progn
-;;                 (require 'eaf)
-;;                 (message "EAF загружен из: %s" eaf-dir)
-;;                 (throw 'found t))
-;;             (error
-;;              (message "Не удалось загрузить EAF из %s: %s" eaf-dir err))))))
-;;     nil))  ;; Возвращаем nil если не нашли
+;;   (let ((eaf-dir "~/.emacs.d/site-lisp/emacs-application-framework"))
+;;     (if (not (file-directory-p eaf-dir))
+;;         (progn
+;;           (message "EAF не найден в %s. Установите его вручную." eaf-dir)
+;;           nil)
+;;       (add-to-list 'load-path eaf-dir)
+;;       (condition-case err
+;;           (progn
+;;             (require 'eaf)
+;;             (message "EAF базовая загрузка успешна")
+;;             t)
+;;         (error
+;;          (message "Ошибка загрузки EAF: %s" err)
+;;          nil)))))
 
 ;; ;; Основные настройки EAF (вызываются сразу после загрузки)
 ;; (defun my/setup-eaf-basic ()
@@ -1737,38 +1521,7 @@
 ;;   (unless (file-exists-p eaf-config-location)
 ;;     (make-directory (file-name-directory eaf-config-location) t)))
 
-;; ;; Функции для копирования/вставки между Emacs и EAF
-;; (defun my/eaf-copy-to-clipboard (text)
-;;   "Копирует текст в системный буфер обмена."
-;;   (interactive)
-;;   (when (fboundp 'gui-set-selection)
-;;     (gui-set-selection 'CLIPBOARD text)
-;;     (gui-set-selection 'PRIMARY text)
-;;     (message "Текст скопирован в буфер обмена: %s" (truncate-string-to-width text 50))))
-
-;; (defun my/eaf-paste-from-clipboard ()
-;;   "Вставляет текст из системного буфера обмена."
-;;   (interactive)
-;;   (when (fboundp 'gui-get-selection)
-;;     (gui-get-selection 'CLIPBOARD)))
-
-;; (defun my/copy-to-eaf ()
-;;   "Копирует выделенный текст Emacs в EAF буфер обмена."
-;;   (interactive)
-;;   (let ((text (if (use-region-p)
-;;                   (buffer-substring-no-properties (region-beginning) (region-end))
-;;                 (current-kill 0))))
-;;     (my/eaf-copy-to-clipboard text)
-;;     (message "Скопировано в EAF: %s" (truncate-string-to-width text 50))))
-
-;; (defun my/paste-from-eaf ()
-;;   "Вставляет текст из EAF буфера обмена в Emacs."
-;;   (interactive)
-;;   (let ((text (my/eaf-paste-from-clipboard)))
-;;     (when text
-;;       (insert text))))
-
-;; ;; Команды для быстрого доступа к EAF
+;; ;; Команды для быстрого доступа к EAF браузеру
 ;; (defun eaf-open-browser-wrapper (url)
 ;;   "Обертка для eaf-open-browser с проверкой."
 ;;   (interactive "sURL: ")
@@ -1781,23 +1534,6 @@
 ;;   (interactive)
 ;;   (eaf-open-browser-wrapper "https://www.google.com"))
 
-;; (defun eaf-open-gmail ()
-;;   "Открыть Gmail."
-;;   (interactive)
-;;   (eaf-open-browser-wrapper "https://mail.google.com"))
-
-;; (defun eaf-open-youtube ()
-;;   "Открыть YouTube."
-;;   (interactive)
-;;   (eaf-open-browser-wrapper "https://www.youtube.com"))
-
-;; (defun my/eaf-open-file-manager ()
-;;   "Открыть файловый менеджер EAF."
-;;   (interactive)
-;;   (if (fboundp 'eaf-open)
-;;       (eaf-open "~/" "file-manager")
-;;     (message "EAF не загружен")))
-
 ;; (defun my/eaf-open-terminal ()
 ;;   "Открыть терминал EAF."
 ;;   (interactive)
@@ -1805,7 +1541,7 @@
 ;;       (eaf-open "~/" "terminal")
 ;;     (message "EAF не загружен")))
 
-;; ;; Функции для решения проблем с Google
+;; ;; Функции для решения проблем с браузером
 ;; (defun eaf-clear-cache ()
 ;;   "Очистить кэш EAF."
 ;;   (interactive)
@@ -1841,7 +1577,7 @@
 ;;     (message "User-agent изменен на: %s" agent)))
 
 ;; (defun eaf-login-google ()
-;;   "Открыть Google с настройками для входа в аккаунт."
+;;   "Открыть Google с настройки для входа в аккаунт."
 ;;   (interactive)
 ;;   (let ((original-user-agent (when (boundp 'eaf-browser-user-agent) eaf-browser-user-agent))
 ;;         (original-cookie (when (boundp 'eaf-browser-enable-cookie) eaf-browser-enable-cookie)))
@@ -1875,74 +1611,46 @@
 ;; (when (my/ensure-eaf-loaded)
 ;;   (my/setup-eaf-basic)
 
-;;   ;; ;; Привязываем команды EAF к префиксной карте
-;;   ;; (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
-;;   ;; (define-key my-eaf-map (kbd "g") 'eaf-open-google)
-;;   ;; (define-key my-eaf-map (kbd "m") 'eaf-open-gmail)
-;;   ;; (define-key my-eaf-map (kbd "y") 'eaf-open-youtube)
-;;   ;; (define-key my-eaf-map (kbd "f") 'my/eaf-open-file-manager)
-;;   ;; (define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
-;;   ;; (define-key my-eaf-map (kbd "p") 'eaf-open)
-;;   ;; (define-key my-eaf-map (kbd "l") 'eaf-login-google)
-;;   ;; (define-key my-eaf-map (kbd "i") 'eaf-open-google-incognito)
-;;   ;; (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
-;;   ;; (define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
+;;   ;; Привязываем команды EAF к префиксной карте
+;;   (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
+;;   (define-key my-eaf-map (kbd "g") 'eaf-open-google)
+;;   (define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
+;;   (define-key my-eaf-map (kbd "l") 'eaf-login-google)
+;;   (define-key my-eaf-map (kbd "i") 'eaf-open-google-incognito)
+;;   (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
+;;   (define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
 
-;;   ;; Загружаем EAF модули с проверкой доступности
-;;   (defun my/load-eaf-modules ()
-;;     "Загружает модули EAF при первом использовании."
-;;     (interactive)
-;;     (dolist (module '(eaf-browser
-;;                       eaf-pdf-viewer
-;;                       eaf-image-viewer
-;;                       eaf-terminal
-;;                       eaf-file-manager))
-;;       (condition-case err
-;;           (progn
-;;             (require module)
-;;             (message "EAF модуль %s загружен" module))
-;;         (error
-;;          (message "Не удалось загрузить модуль %s: %s" module err))))
-;;     ;; Настройка параметров после загрузки модулей
-;;     (when (boundp 'eaf-browser-user-agent)
-;;       (setq eaf-browser-user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-;;             eaf-browser-enable-javascript t
-;;             eaf-browser-enable-cookie t
-;;             eaf-browser-remember-history t
-;;             eaf-browser-download-path "~/Downloads"))
-;;     (message "Основные модули EAF загружены"))
+;;   ;; Откладываем загрузку модулей и настройку клавиш
+;;   (run-with-timer 3 nil
+;;                   (lambda ()
+;;                     ;; Автоматическая загрузка модулей EAF (только текстовые)
+;;                     (dolist (module '(eaf-browser
+;;                                       eaf-pdf-viewer
+;;                                       eaf-image-viewer
+;;                                       eaf-markdown-previewer
+;;                                       eaf-terminal
+;;                                       eaf-org-previewer
+;;                                       eaf-rss-reader))
+;;                       (condition-case err
+;;                           (progn
+;;                             (require module)
+;;                             (message "EAF модуль %s загружен" module))
+;;                         (error
+;;                          (message "Не удалось загрузить модуль %s: %s" module err))))
 
-;;   ;; Загружаем модули при первом вызове любой команды EAF
-;;   (defun my/eaf-with-modules (func &rest args)
-;;     "Загружает модули EAF перед выполнением функции."
-;;     (unless (featurep 'eaf-browser)
-;;       (my/load-eaf-modules))
-;;     (apply func args))
+;;                     ;; Настройка параметров после загрузки модулей
+;;                     (when (boundp 'eaf-browser-user-agent)
+;;                       (setq eaf-browser-user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+;;                             eaf-browser-enable-javascript t
+;;                             eaf-browser-enable-cookie t
+;;                             eaf-browser-remember-history t
+;;                             eaf-browser-enable-password t
+;;                             eaf-browser-continue-where-left-off t
+;;                             eaf-browser-enable-adblocker t
+;;                             eaf-browser-default-zoom 1.0
+;;                             eaf-browser-download-path "~/Downloads"))
 
-;;   ;; Обертки для команд EAF
-;;   (defun my/eaf-open-browser (url)
-;;     (interactive "sURL: ")
-;;     (my/eaf-with-modules 'eaf-open-browser url))
-
-;;   ;; Переопределяем привязки с обертками
-;;   (define-key my-eaf-map (kbd "b") 'my/eaf-open-browser)
-;;   (define-key my-eaf-map (kbd "g") (lambda () (interactive) (my/eaf-open-browser "https://www.google.com")))
-;;   (define-key my-eaf-map (kbd "m") (lambda () (interactive) (my/eaf-open-browser "https://mail.google.com")))
-;;   (define-key my-eaf-map (kbd "y") (lambda () (interactive) (my/eaf-open-browser "https://www.youtube.com"))))
-
-;; ;; Настройка горячих клавиш EAF с использованием with-eval-after-load
-;; (with-eval-after-load 'eaf
-;;   ;; Добавляем хук для настройки клавиш при создании буфера EAF
-;;   (defun my/setup-eaf-keys-hook ()
-;;     "Настраивает горячие клавиши для текущего буфера EAF."
-;;     (when (derived-mode-p 'eaf-mode)
-;;       ;; Локальные клавиши для всех режимов EAF
-;;       (local-set-key (kbd "C-c c") 'my/copy-to-eaf)
-;;       (local-set-key (kbd "C-c v") 'my/paste-from-eaf)
-;;       (local-set-key (kbd "C-c x") 'kill-region)
-;;       (local-set-key (kbd "C-c a") 'mark-whole-buffer)))
-
-;;   (add-hook 'eaf-mode-hook 'my/setup-eaf-keys-hook))
+;;                     (message "Все модули EAF загружены и настроены!"))))
 
 ;; ;; Настройка горячих клавиш для браузера EAF
 ;; (with-eval-after-load 'eaf-browser
@@ -1989,35 +1697,37 @@
 ;;       (local-set-key (kbd "C-x d") 'eaf-browser-toggle-dark-mode)))
 
 ;;   (add-hook 'eaf-browser-mode-hook 'my/setup-eaf-browser-keys-hook))
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; ;; 16. Завершение инициализации
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; ;; Загружаем кастомные настройки если есть
-;; (when (file-exists-p "~/.emacs.d/local.el")
-;;   (load-file "~/.emacs.d/local.el"))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 16. Завершение инициализации
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Загружаем кастомные настройки если есть
+(when (file-exists-p "~/.emacs.d/local.el")
+  (load-file "~/.emacs.d/local.el"))
 
-;; ;; Сообщение о готовности
-;; (add-hook 'emacs-startup-hook
-;;           (lambda ()
-;;             (message "Emacs готов! Загрузка заняла %.2f секунд"
-;;                      (float-time (time-subtract after-init-time before-init-time)))
-;;             ;; Исправляем структуру проблемных пакетов
-;;             (run-with-timer 0.5 nil 'my/fix-problematic-packages)
-;;             ;; Показываем статус пакетов при запуске
-;;             (run-with-timer 1.0 nil 'my/show-packages-status)
-;;             ;; Показываем доступные команды
-;;             (message "Команды управления пакетами: C-c g p [s]татус, [d]ownload, [u]pdate, [c]lean, [f]ix")
-;;             (message "Команды для Lisp/SKILL: C-c g l [s]lime, [e]val, [b]uffer, [r]epl, [c]adence")
-;;             (message "Команды для EAF: C-c g e [b]rowser, [g]oogle, [m]ail, [y]outube, [f]ile-manager")
-;;             (message "Команды поиска: C-c g s [s]earch, [f]iles, [p]roject, [r]g")
-;;             ;; Дополнительная информация
-;;             (when (featurep 'eaf)
-;;               (message "EAF загружен. Модули будут загружены через 3 секунды..."))))
+;; Сообщение о готовности
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (message "Emacs готов! Загрузка заняла %.2f секунд"
+                     (float-time (time-subtract after-init-time before-init-time)))
+            ;; Исправляем структуру проблемных пакетов
+            (run-with-timer 0.5 nil 'my/fix-problematic-packages)
+            ;; Показываем статус пакетов при запуске
+            (run-with-timer 1.0 nil 'my/show-packages-status)
+            ;; Показываем доступные команды
+            (message "Команды управления пакетами: C-c g p [s]татус, [d]ownload, [u]pdate, [c]lean, [f]ix")
+            (message "Команды для Lisp/SKILL: C-c g l [s]lime, [e]val, [b]uffer, [r]epl, [c]adence")
+            ;; (message "Команды для EAF: C-c g e [b]rowser, [g]oogle, [m]ail, [f]ile-manager")
+            (message "Команды поиска: C-c g s [s]earch, [f]iles, [p]roject, [r]g")
+            ;; Дополнительная информация
+            (when (featurep 'eaf)
+              (message "EAF загружен. Будет использоваться только как текстовый браузер."))))
 
-;; ;; Восстанавливаем GC на нормальный уровень
-;; (add-hook 'emacs-startup-hook
-;;           (lambda ()
-;;             (setq gc-cons-threshold (* 16 1024 1024))))  ; 16MB
+;; Восстанавливаем GC на нормальный уровень
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (setq gc-cons-threshold (* 16 1024 1024))))  ; 16MB
 
-;; (provide 'init)
-;; ;;; init.el ends here
+;; Загружаем модуль отладки микроконтроллеров
+(load (expand-file-name "mcu-debug.el" user-emacs-directory) t 'nomessage)
+
+(provide 'init)
