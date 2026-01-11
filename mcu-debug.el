@@ -165,23 +165,27 @@
     gdb-exe))
 
 ;; ============================================================================
-;; Запуск симуляторов и отладчиков (ИСПРАВЛЕНО - ПРОСТОЙ ЗАПУСК)
+;; Запуск симуляторов и отладчиков
 ;; ============================================================================
 
 (defun mcu-debug-launch-simulator-simple (elf-file)
   "Простой запуск simavr в терминале."
   (let* ((elf-dir (file-name-directory elf-file))
          (elf-name (file-name-nondirectory elf-file))
-         (cmd (format "cd '%s' && simavr -m atmega328 -f 16000000 -g '%s' &"
+         (cmd (format "cd '%s' && simavr -m atmega328 -f 16000000 -g '%s'"
                       elf-dir elf-name)))
 
     (message "Запуск simavr командой: %s" cmd)
 
-    ;; Запускаем в shell без захвата вывода
-    (shell-command cmd)
+    ;; Запускаем в отдельном буфере
+    (let ((sim-buffer (get-buffer-create "*simavr*")))
+      (with-current-buffer sim-buffer
+        (erase-buffer)
+        (compilation-shell-minor-mode 1)
+        (setq-local comint-scroll-show-maximum-output t))
 
-    ;; Даем время на запуск
-    (sleep-for 3)
+      (async-shell-command cmd sim-buffer)
+      (sleep-for 3))
 
     ;; Проверяем, слушает ли порт 1234
     (let ((port-open-p
@@ -205,12 +209,18 @@
     (unless uart-debugger
       (return-from mcu-debug-launch-uart-debugger nil))
 
-    (let ((cmd (format "cd '%s' && %s %s &"
+    (let ((cmd (format "cd '%s' && %s %s"
                        project-dir uart-debugger uart-args)))
       (message "Запуск UART отладчика: %s" cmd)
-      (shell-command cmd)
-      (sleep-for 3)
-      t)))
+
+      (let ((uart-buffer (get-buffer-create "*uart-debugger*")))
+        (with-current-buffer uart-buffer
+          (erase-buffer)
+          (compilation-shell-minor-mode 1))
+
+        (async-shell-command cmd uart-buffer)
+        (sleep-for 3)
+        t))))
 
 (defun mcu-debug-stop-all-processes ()
   "Остановить все процессы MCU отладки."
@@ -219,33 +229,221 @@
   (shell-command "pkill -f simavr 2>/dev/null")
   ;; Останавливаем процессы avrdude
   (shell-command "pkill -f avrdude 2>/dev/null")
-  ;; Закрываем GDB
+  ;; Останавливаем процессы openocd
+  (shell-command "pkill -f openocd 2>/dev/null")
+  ;; Закрываем GDB буферы
   (when (get-buffer "*gud*")
     (kill-buffer "*gud*"))
   (message "Все процессы MCU отладки остановлены"))
 
 ;; ============================================================================
-;; Построение команд GDB (ИСПРАВЛЕНО)
+;; Построение команд GDB
 ;; ============================================================================
 
-(defun mcu-debug-build-gdb-init-script (elf-file sim-mode)
-  "Создать скрипт инициализации для GDB."
+(defun mcu-debug-build-gdb-init-script (project-dir elf-file sim-mode)
+  "Создать скрипт инициализации для GDB в директории проекта."
   (let* ((port (if sim-mode 1234 mcu-debug-default-uart-port))
-         (script-file (make-temp-file "gdb-init-" nil ".gdb"))
-         (commands (format "file %s
+         ;; Создаем скрипт в директории проекта
+         (script-file (expand-file-name ".gdbinit-debug" project-dir))
+         ;; Полные пути к файлам
+         (full-elf-path (expand-file-name elf-file))
+         (full-project-path project-dir)
+         (commands (format "
+# Автоматический скрипт инициализации GDB для MCU отладки
+# Создан %s
+
+# Устанавливаем параметры
+set confirm off
+set pagination off
+set height 0
+set width 0
+
+# Подключаемся к цели
+file \"%s\"
 target remote localhost:%d
+directory \"%s\"
+
+# Устанавливаем точку останова на main
 break main
-continue
-" elf-file port)))
+
+# Комментарии для пользователя:
+# Используйте Ctrl+C для прерывания
+# Ctrl+Z для паузы
+# 'step', 'next', 'continue' для управления выполнением
+" (current-time-string) full-elf-path port full-project-path)))
 
     (with-temp-file script-file
       (insert commands))
 
+    (message "Создан скрипт GDB: %s" script-file)
     script-file))
 
 ;; ============================================================================
-;; Основные функции отладки (ИСПРАВЛЕНО)
+;; Настройка окон GDB (аналогичная my/apply-gdb-layout из init.el)
 ;; ============================================================================
+
+(defun mcu-debug-get-gdb-buffer-by-mode (mode)
+  "Поиск буфера GDB по Major Mode."
+  (cl-find-if (lambda (b) (with-current-buffer b (eq major-mode mode)))
+              (buffer-list)))
+
+(defun mcu-debug-populate-gdb-windows ()
+  "Заполнение окон строго по их назначению."
+  (let ((mode-to-purpose '((gdb-locals-mode       . gdb-locals)
+                           (gdb-registers-mode    . gdb-regs)
+                           (gdb-stack-buffer-mode . gdb-stack)
+                           (gdb-frames-mode       . gdb-stack)
+                           (gdb-breakpoints-mode  . gdb-breaks)
+                           (gdb-disassembly-mode  . gdb-disasm)
+                           (gdb-inferior-io-mode  . gdb-io)
+                           (gud-mode              . gdb-out))))
+    (dolist (mapping mode-to-purpose)
+      (let* ((mode (car mapping))
+             (purp (cdr mapping))
+             (buf (mcu-debug-get-gdb-buffer-by-mode mode))
+             (win (cl-find-if (lambda (w)
+                                (and (window-live-p w)
+                                     (fboundp 'purpose-window-purpose-get)
+                                     (eq (purpose-window-purpose-get w) purp)))
+                              (window-list))))
+        (when (and buf win (window-live-p win))
+          (set-window-buffer win buf)
+          (set-window-dedicated-p win t))))))
+
+(defun mcu-debug-apply-gdb-layout ()
+  "Построение IDE во втором фрейме с пропорциями 10-10-10-10-60 справа."
+  (interactive)
+  (delete-other-windows)
+  (let* ((left-win (selected-window))
+         (right-win
+          (split-window left-win (floor (* (window-total-width) 0.55)) 'right)))
+
+    ;; Проверяем, что разделение прошло успешно
+    (unless (window-live-p right-win)
+      (error "Не удалось создать правое окно"))
+
+    ;; ЛЕВАЯ КОЛОННА
+    (with-selected-window left-win
+      (let* ((w-gdb (split-window-below (floor (* (window-height) 0.7))))
+             (w-io  (with-selected-window w-gdb
+                      (split-window-below (floor (* (window-height) 0.5))))))
+        (when (window-live-p w-gdb)
+          (purpose-set-window-purpose 'edit left-win)
+          (purpose-set-window-purpose 'gdb-out w-gdb))
+        (when (window-live-p w-io)
+          (purpose-set-window-purpose 'gdb-io w-io))
+        (switch-to-buffer (other-buffer (current-buffer) t))))
+
+    ;; ПРАВАЯ КОЛОННА (Настройка пропорций)
+    (with-selected-window right-win
+      (let* ((total-h (window-height))
+             (h-step (floor (* total-h 0.1)))
+             w-stack w-locals w-regs w-breaks)
+
+        (setq w-stack (split-window-below h-step))
+        (when (window-live-p w-stack)
+          (purpose-set-window-purpose 'gdb-disasm right-win)
+          (purpose-set-window-purpose 'gdb-stack w-stack)
+
+          (with-selected-window w-stack
+            (setq w-locals (split-window-below h-step)))
+
+          (when (window-live-p w-locals)
+            (purpose-set-window-purpose 'gdb-locals w-locals)
+
+            (with-selected-window w-locals
+              (setq w-regs (split-window-below h-step)))
+
+            (when (window-live-p w-regs)
+              (purpose-set-window-purpose 'gdb-regs w-regs)
+
+              (with-selected-window w-regs
+                (setq w-breaks (split-window-below h-step)))
+
+              (when (window-live-p w-breaks)
+                (purpose-set-window-purpose 'gdb-breaks w-breaks)))))))
+
+    ;; Генерация буферов (только если окна существуют)
+    (gdb-display-io-buffer)
+    (gdb-display-gdb-buffer)
+    (gdb-display-registers-buffer)
+    (gdb-display-locals-buffer)
+    (gdb-display-stack-buffer)
+    (gdb-display-breakpoints-buffer)
+    (gdb-display-disassembly-buffer)
+
+    (run-with-timer 0.5 nil #'mcu-debug-populate-gdb-windows)))
+
+;; ============================================================================
+;; Основные функции отладки
+;; ============================================================================
+
+(defun mcu-debug-launch-gdb-session (project-dir target-name sim-mode)
+  "Запустить сессию GDB для отладки MCU."
+  (let* ((elf-file (mcu-debug-find-elf-file project-dir target-name))
+         (gdb-init-script (mcu-debug-build-gdb-init-script project-dir elf-file sim-mode))
+         (gdb-exe (mcu-debug-ensure-gdb-executable target-name))
+         (gdb-cmd (format "%s --interpreter=mi -x %s" gdb-exe gdb-init-script)))
+
+    (message "Запуск GDB с командой: %s" gdb-cmd)
+
+    ;; Создаем отдельный фрейм для отладки
+    (let ((debug-frame (make-frame `((name . ,(format "MCU-DEBUG-%s" target-name))
+                                     (width . 200)
+                                     (height . 85)
+                                     (left . 1200)
+                                     (top . 0)))))
+      (select-frame debug-frame)
+
+      ;; Включаем Purpose в новом фрейме
+      (with-selected-frame debug-frame
+        (unless purpose-mode
+          (purpose-mode 1))
+        ;; Гарантируем, что helm и which-key работают
+        (my/ensure-helm-in-frame debug-frame)
+        (my/ensure-which-key-in-frame debug-frame))
+
+      ;; Устанавливаем рабочую директорию и запускаем GDB
+      (let ((default-directory project-dir))
+        ;; Запускаем GDB
+        (gdb gdb-cmd))
+
+      ;; Настраиваем буфер GDB для интерактивности
+      (run-with-timer 1 nil
+                      (lambda ()
+                        (let ((gdb-buffer (get-buffer "*gud*")))
+                          (when (buffer-live-p gdb-buffer)
+                            (with-current-buffer gdb-buffer
+                              (setq buffer-read-only nil)
+                              (setq-local comint-scroll-show-maximum-output t)
+                              (setq-local comint-prompt-read-only nil)
+                              (setq-local gud-minor-mode 'gdbmi)
+                              ;; Включаем режим компиляции для интерактивных команд
+                              (compilation-shell-minor-mode 1)
+                              ;; Настраиваем клавиши
+                              (local-set-key (kbd "C-c C-c") 'gdb-gud-control-c)
+                              (local-set-key (kbd "C-c C-z") 'gdb-gud-control-z)
+                              (message "Буфер GDB настроен для интерактивного ввода"))))))
+
+      ;; Применяем раскладку окон через 3 секунды, чтобы GDB успел создать буферы
+      (run-with-timer 3 nil
+                      (lambda ()
+                        (select-frame debug-frame)
+                        (message "Применение раскладки окон GDB...")
+                        (condition-case err
+                            (progn
+                              (mcu-debug-apply-gdb-layout)
+                              (message "Раскладка окон GDB применена"))
+                          (error
+                           (message "Не удалось применить раскладку GDB: %s" err)))))
+
+      ;; Удаляем временный файл скрипта через 10 секунд
+      (run-with-timer 10 nil
+                      (lambda ()
+                        (when (file-exists-p gdb-init-script)
+                          (delete-file gdb-init-script))))
+
+      (message "Сессия GDB запущена для %s. Используйте буфер *gud* для команд." target-name))))
 
 ;;;###autoload
 (defun mcu-debug-start-simulation (target-name)
@@ -275,37 +473,9 @@ continue
     (unless (mcu-debug-launch-simulator-simple elf-file)
       (error "Не удалось запустить симулятор. Убедитесь, что simavr установлен."))
 
-    ;; Создаем скрипт инициализации GDB
-    (let ((gdb-init-script (mcu-debug-build-gdb-init-script elf-file t))
-          (gdb-exe (mcu-debug-ensure-gdb-executable target-name)))
-
-      (message "Запуск GDB с инициализационным скриптом...")
-
-      ;; Запускаем GDB в отдельном фрейме
-      (let ((frame (make-frame `((name . ,(format "MCU-DEBUG-%s" target-name))
-                                 (width . 200)
-                                 (height . 85)
-                                 (left . 1200)
-                                 (top . 0)))))
-        (select-frame frame)
-
-        ;; Запускаем GDB с интерпретатором MI
-        (gdb (format "%s --interpreter=mi -x %s" gdb-exe gdb-init-script))
-
-        ;; Применяем раскладку окон
-        (run-with-timer 2 nil
-                        (lambda ()
-                          (condition-case err
-                              (when (fboundp 'my/apply-gdb-layout)
-                                (my/apply-gdb-layout)
-                                (message "Раскладка окон GDB применена"))
-                            (error
-                             (message "Не удалось применить раскладку GDB: %s" err)))))
-
-        ;; Удаляем временный файл скрипта
-        (run-with-timer 5 nil (lambda () (delete-file gdb-init-script)))
-
-        (message "Сессия отладки симуляции запущена для %s" target-name)))))
+    ;; Запускаем GDB через 2 секунды
+    (run-with-timer 2 nil (lambda ()
+                            (mcu-debug-launch-gdb-session project-dir target-name t)))))
 
 ;;;###autoload
 (defun mcu-debug-start-uart-debug (target-name)
@@ -335,37 +505,9 @@ continue
     (unless (mcu-debug-launch-uart-debugger target-name)
       (message "UART отладчик не запущен. Убедитесь, что устройство подключено."))
 
-    ;; Создаем скрипт инициализации GDB
-    (let ((gdb-init-script (mcu-debug-build-gdb-init-script elf-file nil))
-          (gdb-exe (mcu-debug-ensure-gdb-executable target-name)))
-
-      (message "Запуск GDB с инициализационным скриптом...")
-
-      ;; Запускаем GDB в отдельном фрейме
-      (let ((frame (make-frame `((name . ,(format "MCU-DEBUG-%s" target-name))
-                                 (width . 200)
-                                 (height . 85)
-                                 (left . 1200)
-                                 (top . 0)))))
-        (select-frame frame)
-
-        ;; Запускаем GDB с интерпретатором MI
-        (gdb (format "%s --interpreter=mi -x %s" gdb-exe gdb-init-script))
-
-        ;; Применяем раскладку окон
-        (run-with-timer 2 nil
-                        (lambda ()
-                          (condition-case err
-                              (when (fboundp 'my/apply-gdb-layout)
-                                (my/apply-gdb-layout)
-                                (message "Раскладка окон GDB применена"))
-                            (error
-                             (message "Не удалось применить раскладку GDB: %s" err)))))
-
-        ;; Удаляем временный файл скрипта
-        (run-with-timer 5 nil (lambda () (delete-file gdb-init-script)))
-
-        (message "Сессия отладки UART запущена для %s" target-name)))))
+    ;; Запускаем GDB через 3 секунды
+    (run-with-timer 3 nil (lambda ()
+                            (mcu-debug-launch-gdb-session project-dir target-name nil)))))
 
 ;; ============================================================================
 ;; Вспомогательные функции
@@ -404,6 +546,33 @@ continue
                        (shell-quote-argument project-dir)
                        make-target)))
       (compile cmd))))
+
+;; ============================================================================
+;; Утилиты для работы с буфером GDB
+;; ============================================================================
+
+(defun my/unlock-gdb-buffer ()
+  "Разблокировать буфер GDB для ввода команд."
+  (interactive)
+  (let ((gdb-buffer (get-buffer "*gud*")))
+    (when (buffer-live-p gdb-buffer)
+      (with-current-buffer gdb-buffer
+        (setq buffer-read-only nil)
+        (setq-local comint-scroll-show-maximum-output t)
+        (setq-local comint-prompt-read-only nil)
+        (message "Буфер GDB разблокирован для ввода"))
+      t)))
+
+(defun my/gdb-send-command (command)
+  "Отправить команду в буфер GDB."
+  (interactive "sКоманда GDB: ")
+  (let ((gdb-buffer (get-buffer "*gud*")))
+    (when (buffer-live-p gdb-buffer)
+      (with-current-buffer gdb-buffer
+        (goto-char (point-max))
+        (insert command)
+        (comint-send-input))
+      (message "Команда отправлена: %s" command))))
 
 ;; ============================================================================
 ;; Шаблоны и конфигурации
@@ -484,6 +653,10 @@ continue
   (define-key mcu-debug-global-map (kbd "g") 'mcu-debug-generate-template)
   (define-key mcu-debug-global-map (kbd "l") 'mcu-debug-load-all-templates)
   (define-key mcu-debug-global-map (kbd "k") 'mcu-debug-stop-all-processes)
+
+  ;; Утилиты для работы с GDB
+  (define-key mcu-debug-global-map (kbd "U") 'my/unlock-gdb-buffer)
+  (define-key mcu-debug-global-map (kbd "C") 'my/gdb-send-command)
 
   ;; Информация о проекте
   (define-key mcu-debug-global-map (kbd "p")
