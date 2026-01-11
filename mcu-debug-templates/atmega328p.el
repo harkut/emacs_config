@@ -15,6 +15,15 @@
    :flash-make-target-release "flash-release"
    :debug-cflags "-g -Og"
    :release-cflags "-Os -flto"
+   :make-variables ((MCU . "atmega328p")
+                    (F_CPU . 16000000)
+                    (CC . "avr-gcc")
+                    (OBJCOPY . "avr-objcopy")
+                    (OBJDUMP . "avr-objdump")
+                    (SIZE . "avr-size")
+                    (AVRDUDE . "avrdude")
+                    (PROGRAMMER_TYPE . "arduino")
+                    (PROGRAMMER_BAUD . 57600))
    :memory-map ((flash :start 0x0 :size 0x8000)
                 (sram  :start 0x100 :size 0x800))))
 

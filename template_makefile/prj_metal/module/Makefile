@@ -1,17 +1,21 @@
 # @	Имя цели
 # $<	Первая зависимость
 # $^	Все зависимости
-# $?	Зависимости новее цели	(если изменились)
-# $*	Stem (часть до %)
-# $(@D)	Директория цели
-# $(<F)	Имя файла зависимости
+# $?	Зависимости новее цели (если изменились)
 # ==========================================
-# Настройки проекта
+# Настройки проекта (могут быть переопределены извне)
 # ==========================================
-TARGET   = avr_main
-MCU      = atmega328p
-CC       = avr-gcc
-F_CPU    = 16000000
+TARGET   ?= avr_main
+MCU      ?= atmega328p
+F_CPU    ?= 16000000
+CC       ?= avr-gcc
+OBJCOPY  ?= avr-objcopy
+OBJDUMP  ?= avr-objdump
+SIZE     ?= avr-size
+AVRDUDE  ?= avrdude
+PROGRAMMER_TYPE ?= arduino
+PROGRAMMER_BAUD ?= 57600
+
 SRC_DIR  = src
 OBJ_DIR  = obj
 BIN_DIR  = bin
@@ -31,68 +35,33 @@ OBJS     = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR_MODE)/%.o, $(SRCS))
 DEPS     = $(OBJS:.o=.d)
 
 # ==========================================
-# Утилиты
+# Автоопределение порта программатора
 # ==========================================
-OBJCOPY  = avr-objcopy
-OBJDUMP  = avr-objdump
-SIZE     = avr-size
-CHECKER  = cppcheck
-DOXYGEN  = doxygen
-AVRDUDE  = avrdude
-
-# ==========================================
-# Настройки программатора
-# ==========================================
-# Для Arduino Uno/Nano
-PROGRAMMER_TYPE = arduino
 AUTO_PORT := $(shell ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -n1)
 ifeq ($(AUTO_PORT),)
     PROGRAMMER_PORT = /dev/ttyACM0
 else
     PROGRAMMER_PORT = $(AUTO_PORT)
 endif
-PROGRAMMER_BAUD = 57600
 
 # ==========================================
 # Флаги компиляции и линковки в зависимости от режима
 # ==========================================
-# DEBUG режим: с отладочной информацией и минимальными оптимизациями
-# -Og: оптимизация для отладки (не нарушает отладочную информацию)
-# -g: отладочная информация
-# -DDEBUG: макрос для отладочного кода
 DEBUG_CFLAGS   = -g -Og -DDEBUG
-
-# RELEASE режим: максимальная оптимизация по размеру, без отладочной информации
-# -Os: оптимизация по размеру
-# -flto: межмодульная оптимизация
-# -DNDEBUG: отключает assert и отладочный код
 RELEASE_CFLAGS = -Os -flto -DNDEBUG
 
-# Выбор флагов в зависимости от режима
 ifeq ($(BUILD_MODE),debug)
     CFLAGS_MODE = $(DEBUG_CFLAGS)
     TARGET_SUFFIX = -debug
-    # В debug режиме отключаем некоторые предупреждения для delay.h
     WARN_FLAGS = -Wall -Wextra -Wno-error=cpp
 else ifeq ($(BUILD_MODE),release)
     CFLAGS_MODE = $(RELEASE_CFLAGS)
     TARGET_SUFFIX = -release
-    # В release режиме все предупреждения = ошибки
     WARN_FLAGS = -Wall -Wextra -Werror
 else
     $(error Неизвестный режим сборки: $(BUILD_MODE). Используйте debug или release)
 endif
 
-# Базовые флаги компиляции
-# -mmcu=$(MCU) - целевой микроконтроллер
-# -DF_CPU=$(F_CPU)UL - define для макросов задержки
-# -ffunction-sections -fdata-sections - раздельная компиляция для линкера,
-#					каждая функция в отдельной секции →
-#						линкер может удалить неиспользуемые
-# -funsigned-char -funsigned-bitfields - строгая типизация явная
-# -fpack-struct -fshort-enums - оптимизация структур
-# -std=gnu99 - стандарт C с расширениями GNU
-# -I$(INC_DIR) - путь к заголовкам
 BASE_CFLAGS   = -mmcu=$(MCU) -DF_CPU=$(F_CPU)UL \
                 $(WARN_FLAGS) \
                 -ffunction-sections -fdata-sections \
@@ -103,14 +72,10 @@ BASE_CFLAGS   = -mmcu=$(MCU) -DF_CPU=$(F_CPU)UL \
 
 CFLAGS   = $(BASE_CFLAGS) $(CFLAGS_MODE)
 
-# -Wl,-Map,file.map - генерация карты памяти (анализ распределения памяти)
-# -Wl,--gc-sections - удаление неиспользуемых секций (уменьшение размера)
-# -Wl,--relax - релаксация (оптимизация переходов для AVR)
 LDFLAGS  = -mmcu=$(MCU) \
            -Wl,--gc-sections \
            -Wl,--relax
 
-# Для release режима добавляем межмодульную оптимизацию
 ifeq ($(BUILD_MODE),release)
     LDFLAGS += -flto
 endif
@@ -120,61 +85,47 @@ endif
 # ==========================================
 .PHONY: all clean doc flash flash-release check help debug release $(OBJ_DIR_MODE) $(BIN_DIR_MODE)
 
-# all → зависит от debug (по умолчанию)
 all: debug
 
-# Специальные цели для режимов сборки
+# При сборке выводим используемые переменные
 debug: BUILD_MODE = debug
-debug: $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).hex size
+debug: $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).hex
+	@echo "=== Сборка завершена ==="
+	@echo "MCU: $(MCU)"
+	@echo "F_CPU: $(F_CPU)"
+	@echo "Режим: $(BUILD_MODE)"
+	@$(SIZE) --format=avr --mcu=$(MCU) $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).elf
 
 release: BUILD_MODE = release
-release: $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).hex size
+release: $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).hex
+	@echo "=== Сборка завершена ==="
+	@echo "MCU: $(MCU)"
+	@echo "F_CPU: $(F_CPU)"
+	@echo "Режим: $(BUILD_MODE)"
+	@$(SIZE) --format=avr --mcu=$(MCU) $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).elf
 
-# Создание директорий
 $(OBJ_DIR_MODE) $(BIN_DIR_MODE):
 	@mkdir -p $@
 
-# Генерация hex файла
-# -O ihex - формат Intel HEX
-# -R .eeprom - исключение секции EEPROM
 $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).hex: $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).elf
 	@echo "Creating HEX file for $(BUILD_MODE)..."
 	$(OBJCOPY) -O ihex -R .eeprom $< $@
 	@echo "HEX file created: $@"
 
-# Линковка
 $(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).elf: $(OBJS) | $(BIN_DIR_MODE)
 	@echo "Linking for $(BUILD_MODE)..."
 	$(CC) $(LDFLAGS) -o $@ $(OBJS)
 	@echo "ELF created: $@"
 
-# Компиляция с генерацией зависимостей
-# % - wildcard (подстановка)
-# $< - исходный файл (.c)
-# -MMD: Создать файл зависимостей (исключая системные заголовки)
-# -MP: Добавить phony-таргеты для заголовков
-# -MF: Указать имя файла зависимостей
-# -MT: Указать имя цели
-# -c - только компиляция (без линковки)
 $(OBJ_DIR_MODE)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR_MODE)
 	@echo "Compiling $< for $(BUILD_MODE)..."
 	$(CC) $(CFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
-# Подключение файлов зависимостей (.d)
 -include $(DEPS)
 
 # ==========================================
 # Программирование
 # ==========================================
-#     -p $(MCU) - тип микроконтроллера
-#     -c $(PROGRAMMER_TYPE) - тип программатора
-#     -P $(PORT) - порт подключения
-#     -b $(BAUD) - скорость
-#     -U flash:w:file.hex:i - операция записи
-# Формат операции: -U <memtype>:r|w|v:<filename>[:format]
-#     memtype - flash, eeprom, hfuse, lfuse, efuse
-#     r - read, w - write, v 	- verify
-#     :i - формат Intel HEX
 flash: debug
 	@echo "Programming $(MCU) (debug mode)..."
 	$(AVRDUDE) -p $(MCU) -c $(PROGRAMMER_TYPE) \
@@ -186,19 +137,6 @@ flash-release: release
 	$(AVRDUDE) -p $(MCU) -c $(PROGRAMMER_TYPE) \
 	  -P $(PROGRAMMER_PORT) -b $(PROGRAMMER_BAUD) \
 	  -U flash:w:$(BIN_DIR)/release/$(TARGET)-release.hex:i
-
-# Для самодельных программаторов
-isp:
-	@echo "Programming via ISP..."
-	$(AVRDUDE) -p $(MCU) -c usbasp \
-	  -U flash:w:$(BIN_DIR_MODE)/$(TARGET)$(TARGET_SUFFIX).hex:i
-
-# Установка фьюзов (пример для ATmega328P с внутренним RC 8MHz)
-fuses:
-	@echo "Setting fuses for $(MCU)..."
-	$(AVRDUDE) -p $(MCU) -c $(PROGRAMMER_TYPE) \
-	  -P $(PROGRAMMER_PORT) -b $(PROGRAMMER_BAUD) \
-	  -U lfuse:w:0xe2:m -U hfuse:w:0xd9:m -U efuse:w:0xff:m
 
 # ==========================================
 # Анализ и отладка

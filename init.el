@@ -1137,60 +1137,49 @@
 ;; Загружаем модуль отладки микроконтроллеров
 (load (expand-file-name "mcu-debug.el" user-emacs-directory) t 'nomessage)
 
-;; Основные функции MCU
+;; Основные функции для проверки
 (defun my/check-mcu-targets ()
   "Проверить загруженные цели MCU."
   (interactive)
   (if (boundp 'mcu-debug-targets)
       (if mcu-debug-targets
           (progn
-            (message "Загружено %d целей:" (length mcu-debug-targets))
+            (message "Загружено %d целей MCU:" (length mcu-debug-targets))
             (dolist (target mcu-debug-targets)
-              (message "  - %s" (car target))))
-        (message "Цели MCU не загружены. Проверьте директорию шаблонов: %s"
-                 mcu-debug-templates-dir))
+              (let* ((name (car target))
+                     (plist (cdr target))
+                     (make-vars (plist-get plist :make-variables)))
+                (message "  - %s" name)
+                (when make-vars
+                  (dolist (var make-vars)
+                    (message "      %s=%s" (car var) (cdr var)))))))
+        (message "Цели MCU не загружены"))
     (message "Модуль MCU Debugging не загружен")))
 
-(defun my/check-mcu-dependencies ()
-  "Проверить наличие всех необходимых программ для отладки MCU."
+(defun my/check-mcu-config ()
+  "Проверить конфигурацию текущего проекта."
   (interactive)
-  (message "=== Проверка зависимостей MCU ===")
-  (let* ((tools '(("avr-gcc" . "Компилятор AVR")
-                  ("avr-gdb" . "Отладчик AVR")
-                  ("avrdude" . "Программатор AVR")
-                  ("simavr" . "Симулятор AVR")
-                  ("make" . "Система сборки")))
-         (missing '()))
-    (dolist (tool tools)
-      (let ((name (car tool))
-            (desc (cdr tool)))
-        (if (executable-find name)
-            (message "✓ %s (%s) найден" name desc)
-          (progn
-            (message "✗ %s (%s) НЕ найден" name desc)
-            (push (format "%s (%s)" name desc) missing)))))
-    (if missing
-        (progn
-          (message "\nОтсутствующие программы:")
-          (dolist (m missing)
-            (message "  - %s" m))
-          (message "\nУстановите недостающие программы командой:")
-          (message "sudo apt-get install gcc-avr avr-libc avrdude simavr"))
-      (message "\nВсе зависимости удовлетворены!"))))
+  (let* ((project-dir (mcu-debug-find-project-root))
+         (makefile (expand-file-name "Makefile" project-dir)))
+    (if (file-exists-p makefile)
+        (message "Проект: %s\nMakefile: %s"
+                 (file-name-nondirectory project-dir) makefile)
+      (message "Makefile не найден в %s" project-dir))))
 
 ;; Добавляем команды в глобальную карту
 (define-key my-global-map (kbd "T") 'my/check-mcu-targets)
-(define-key my-global-map (kbd "D") 'my/check-mcu-dependencies)
+(define-key my-global-map (kbd "C") 'my/check-mcu-config)
 
-;; Сообщение о готовности MCU модуля
+;; Сообщение о готовности
 (add-hook 'emacs-startup-hook
           (lambda ()
             (when (featurep 'mcu-debug)
-              (message "Модуль MCU Debugging готов. Используйте C-c g m для доступа к командам.")
-              (message "  f - прошить (выбор режима debug/release)")
-              (message "  s - запустить симуляцию")
-              (message "  u - отладка через UART")
-              (message "  b - переключить режим сборки"))))
+              (message "Модуль MCU Debugging готов. Команды:")
+              (message "  C-c g m c - сборка с выбором MCU и цели")
+              (message "  C-c g m f - прошивка с выбором MCU")
+              (message "  C-c g m b - переключить режим сборки")
+              (message "  C-c g T - список целей MCU")
+              (message "  C-c g C - информация о проекте"))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 9. Org Mode (Заметки и Задачи в иерархии проекта)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
