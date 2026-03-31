@@ -26,13 +26,6 @@
       use-package-verbose nil           ; Отключить вывод отладки
       use-package-minimum-reported-time 0.1) ; Показывать только медленные пакеты
 
-;; ;; Ускорение file-name-handler-alist (кэширование путей)
-;; (defvar my/file-name-handler-alist-original file-name-handler-alist)
-;; (setq file-name-handler-alist nil)
-;; (add-hook 'emacs-startup-hook
-;;           (lambda ()
-;;             (setq file-name-handler-alist my/file-name-handler-alist-original)))
-
 ;; Отдельный файл для настроек GUI
 (setq custom-file (locate-user-emacs-file "custom-vars.el"))
 (load custom-file 'noerror 'nomessage)
@@ -423,11 +416,11 @@
 ;; 2. Helm (Интерфейс и Навигация)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (use-package helm
-  :demand t  ; Helm всегда доступен
+  :demand t
   :init
   (helm-mode 1)
   :bind (("M-x" . helm-M-x)
-         ("C-x C-f" . helm-find-files)
+         ("C-x C-f" . helm-find-files)      ; прямая привязка, без обёртки
          ("C-x b" . helm-mini)
          ("C-s" . helm-occur)
          ("M-y" . helm-show-kill-ring)
@@ -443,17 +436,14 @@
   (helm-display-header-line nil)
   (helm-autoresize-max-height 0)
   (helm-autoresize-min-height 20)
-  ;; Исправленный display-function
   (helm-display-function (lambda (buffer &optional resume)
                            (let ((display-buffer-overriding-action
                                   '(display-buffer-same-window
                                     (inhibit-same-window . nil))))
                              (helm-default-display-buffer buffer resume))))
   :config
-  ;; Автодополнение для минибуфера
   (helm-autoresize-mode 1))
 
-;; Теперь определяем функции ПОСЛЕ загрузки helm
 (defun my/ensure-helm-in-frame (frame)
   "Гарантирует, что helm-mode активен в указанном фрейме."
   (with-selected-frame frame
@@ -467,12 +457,22 @@
             (helm-mode 1))
           ;; Перепривязываем ключи для этого фрейма
           (global-set-key (kbd "M-x") 'helm-M-x)
+          ;; Используем обертку для helm-find-files
           (global-set-key (kbd "C-x C-f") 'helm-find-files)
           (global-set-key (kbd "C-x b") 'helm-mini)
           (global-set-key (kbd "C-s") 'helm-occur)
           (global-set-key (kbd "M-y") 'helm-show-kill-ring))
       (error
        (message "Ошибка при включении helm во фрейме: %s" err)))))
+
+(defun my/save-default-directory (&rest _)
+  "Сохраняет default-directory перед вызовом helm-find-files."
+  (setq my/saved-default-directory default-directory))
+
+(defun my/restore-default-directory (&rest _)
+  "Восстанавливает default-directory после вызова helm-find-files."
+  (when (boundp 'my/saved-default-directory)
+    (setq default-directory my/saved-default-directory)))
 
 ;; Функция для принудительной активации which-key во всех фреймах
 (defun my/ensure-which-key-in-frame (frame)
@@ -1367,38 +1367,40 @@
 (use-package window-purpose
   :config
   (purpose-mode 1)
-  ;; Разрешаем Helm открываться поверх Purpose-окон
+  ;; Исключаем буферы Helm из управления purpose
   (add-to-list 'purpose-user-regexp-purposes '("^\\*helm" . nil))
 
-  ;; Правильное переопределение find-file для Purpose
+  ;; Исправленная функция переопределения find-file
   (defun purpose-find-file-overload (&optional arg)
-    "Переопределение find-file для работы с Purpose."
+    "Переопределение find-file для работы с Purpose.
+Временно отключает Purpose, вызывает helm-find-files,
+а затем восстанавливает default-directory исходного буфера."
     (interactive "P")
-    (let ((purpose-mode nil))  ;; Временно отключаем Purpose для этой команды
-      (call-interactively 'helm-find-files)))
+    (let* ((orig-buffer (current-buffer))
+           (orig-dir default-directory)
+           (purpose-mode nil))   ; временно отключаем
+      (unwind-protect
+          (call-interactively 'helm-find-files)
+        (when (buffer-live-p orig-buffer)
+          (with-current-buffer orig-buffer
+            (setq default-directory orig-dir)))
+        (when (boundp 'purpose-mode)
+          (unless purpose-mode (purpose-mode 1))))))
 
-  ;; Используем advice вместо fset для более чистого переопределения
-  (advice-add 'find-file :override #'purpose-find-file-overload)
-
-  ;; Обновим load-purpose-mode
+  ;; Обновлённая функция load-purpose-mode (без изменений первого фрейма)
   (defun load-purpose-mode ()
     (interactive)
-    ;; Прижимаем основной фрейм влево
-    (set-frame-parameter nil 'left 0)
-    (set-frame-parameter nil 'top 0)
-    (my/create-4-pane-grid)
-
     (let ((f2 (make-frame '((name . "GDB-DEBUG")
                             (width . 200)
                             (height . 85)
                             (left . 1200)
                             (top . 0)))))
       (with-selected-frame f2
-        ;; Гарантируем, что helm и which-key работают
         (my/ensure-helm-in-frame f2)
         (my/ensure-which-key-in-frame f2)
         (call-interactively 'gdb)
         (my/apply-gdb-layout))))
+
   :bind (("M-L" . load-purpose-mode)
          ("M-g L" . my/apply-gdb-layout)))
 
@@ -1415,7 +1417,6 @@
   (magit-save-repository-buffers 'dontask)
   (magit-auto-revert-mode t)
   :config
-  ;; Включить автоматическое обновление статуса
   (magit-auto-revert-mode 1))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 12. Docker
@@ -1526,17 +1527,6 @@
 (define-key my-lisp-map (kbd "v") 'my/cadence-run-skill)
 (define-key my-lisp-map (kbd "f") 'my/cadence-load-skill-file)
 
-;; ;; EAF управление
-;; (define-prefix-command 'my-eaf-map)
-;; (define-key my-global-map (kbd "e") my-eaf-map)
-;; (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
-;; (define-key my-eaf-map (kbd "g") 'eaf-open-google)
-;; (define-key my-eaf-map (kbd "f") 'my/eaf-open-file-manager)
-;; (define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
-;; (define-key my-eaf-map (kbd "l") 'eaf-login-google)
-;; (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
-;; (define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
-
 ;; Поиск
 (define-prefix-command 'my-search-map)
 (define-key my-global-map (kbd "s") my-search-map)
@@ -1545,215 +1535,50 @@
 (define-key my-search-map (kbd "p") 'helm-projectile)
 (define-key my-search-map (kbd "r") 'rg-menu)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; 15. EAF (Emacs Application Framework) - ТОЛЬКО ТЕКСТОВЫЙ БРАУЗЕР
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; ;; Функция для проверки и загрузки EAF
-;; (defun my/ensure-eaf-loaded ()
-;;   "Проверяет и загружает EAF с настройками."
-;;   (let ((eaf-dir "~/.emacs.d/site-lisp/emacs-application-framework"))
-;;     (if (not (file-directory-p eaf-dir))
-;;         (progn
-;;           (message "EAF не найден в %s. Установите его вручную." eaf-dir)
-;;           nil)
-;;       (add-to-list 'load-path eaf-dir)
-;;       (condition-case err
-;;           (progn
-;;             (require 'eaf)
-;;             (message "EAF базовая загрузка успешна")
-;;             t)
-;;         (error
-;;          (message "Ошибка загрузки EAF: %s" err)
-;;          nil)))))
-
-;; ;; Основные настройки EAF (вызываются сразу после загрузки)
-;; (defun my/setup-eaf-basic ()
-;;   "Настраивает основные параметры EAF."
-;;   (setq eaf-python-command "python3"
-;;         eaf-start-python-process-when-require t
-;;         eaf-config-location "~/.emacs.d/eaf-config.el")
-
-;;   ;; Убедимся что директория для конфигурации существует
-;;   (unless (file-exists-p eaf-config-location)
-;;     (make-directory (file-name-directory eaf-config-location) t)))
-
-;; ;; Команды для быстрого доступа к EAF браузеру
-;; (defun eaf-open-browser-wrapper (url)
-;;   "Обертка для eaf-open-browser с проверкой."
-;;   (interactive "sURL: ")
-;;   (if (fboundp 'eaf-open-browser)
-;;       (eaf-open-browser url)
-;;     (message "Функция eaf-open-browser не определена. Перезагрузите Emacs.")))
-
-;; (defun eaf-open-google ()
-;;   "Открыть Google."
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ;; 15. НОВАЯ ФУНКЦИЯ ДЛЯ ОТЛАДКИ STM32 (stm32-debug)
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; (defun stm32-start-openocd ()
+;;   "Запустить OpenOCD в фоновом процессе, если не запущен."
 ;;   (interactive)
-;;   (eaf-open-browser-wrapper "https://www.google.com"))
+;;   (let ((openocd-process (get-process "openocd")))
+;;     (if (and openocd-process (process-live-p openocd-process))
+;;         (message "OpenOCD уже запущен")
+;;       (let ((default-directory (expand-file-name "~/sprj/bare_metal/arm/stm32f446_bare")))
+;;         (start-process "openocd" "*openocd*" "openocd" "-f" "openocd.cfg")
+;;         (message "OpenOCD запущен в фоне")))))
 
-;; (defun my/eaf-open-terminal ()
-;;   "Открыть терминал EAF."
+;; (defun stm32-debug ()
+;;   "Запустить отладку STM32 с красивой раскладкой окон.
+;; OpenOCD запускается в фоне, затем GDB подключается к порту 3333."
 ;;   (interactive)
-;;   (if (fboundp 'eaf-open)
-;;       (eaf-open "~/" "terminal")
-;;     (message "EAF не загружен")))
+;;   (stm32-start-openocd)
+;;   (let* ((project-dir (expand-file-name "~/sprj/bare_metal/arm/stm32f446_bare"))
+;;          (elf-file (expand-file-name "bin/debug/stm32f446.elf" project-dir))
+;;          (gdb-command (format "gdb-multiarch -i=mi %s" elf-file)))
+;;     (let ((debug-frame (make-frame '((name . "STM32-DEBUG")
+;;                                      (width . 200)
+;;                                      (height . 85)
+;;                                      (left . 1200)
+;;                                      (top . 0)))))
+;;       (with-selected-frame debug-frame
+;;         (when (fboundp 'my/ensure-helm-in-frame)
+;;           (my/ensure-helm-in-frame debug-frame))
+;;         (when (fboundp 'my/ensure-which-key-in-frame)
+;;           (my/ensure-which-key-in-frame debug-frame))
+;;         (gdb gdb-command)
+;;         (run-with-timer 2 nil
+;;                         (lambda ()
+;;                           (with-current-buffer (gdb-get-buffer 'gdb-inferior-io)
+;;                             (goto-char (point-max))
+;;                             (insert "target remote localhost:3333\n")
+;;                             (gdb-send-item (gdb-mi-create-send-item "target remote localhost:3333")))
+;;                           (run-with-timer 1 nil 'my/apply-gdb-layout)
+;;                           (message "GDB подключён. Введите 'continue' для запуска.")))))))
 
-;; ;; Функции для решения проблем с браузером
-;; (defun eaf-clear-cache ()
-;;   "Очистить кэш EAF."
-;;   (interactive)
-;;   (shell-command "rm -rf ~/.emacs.d/eaf/* 2>/dev/null")
-;;   (message "Кэш EAF очищен"))
+;; ;; Привязываем stm32-debug к C-c g d
+;; (define-key my-global-map (kbd "d") 'stm32-debug)
 
-;; (defun eaf-switch-user-agent (agent)
-;;   "Переключить user-agent браузера."
-;;   (interactive
-;;    (list (completing-read "Выберите user-agent: "
-;;                           '("Chrome Windows"
-;;                             "Chrome Linux"
-;;                             "Firefox Windows"
-;;                             "Firefox Linux"
-;;                             "Safari Mac"
-;;                             "Edge Windows"))))
-;;   (when (boundp 'eaf-browser-user-agent)
-;;     (setq eaf-browser-user-agent
-;;           (cond
-;;            ((equal agent "Chrome Windows")
-;;             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-;;            ((equal agent "Chrome Linux")
-;;             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-;;            ((equal agent "Firefox Windows")
-;;             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/120.0")
-;;            ((equal agent "Firefox Linux")
-;;             "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/120.0")
-;;            ((equal agent "Safari Mac")
-;;             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15")
-;;            ((equal agent "Edge Windows")
-;;             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0")
-;;            (t eaf-browser-user-agent)))
-;;     (message "User-agent изменен на: %s" agent)))
-
-;; (defun eaf-login-google ()
-;;   "Открыть Google с настройки для входа в аккаунт."
-;;   (interactive)
-;;   (let ((original-user-agent (when (boundp 'eaf-browser-user-agent) eaf-browser-user-agent))
-;;         (original-cookie (when (boundp 'eaf-browser-enable-cookie) eaf-browser-enable-cookie)))
-
-;;     ;; Устанавливаем настройки для Google
-;;     (when (boundp 'eaf-browser-user-agent)
-;;       (setq eaf-browser-user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"))
-
-;;     (when (boundp 'eaf-browser-enable-cookie)
-;;       (setq eaf-browser-enable-cookie t))
-
-;;     ;; Открываем Google
-;;     (eaf-open-browser-wrapper "https://accounts.google.com")
-
-;;     ;; Восстанавливаем настройки через 10 секунд
-;;     (run-with-timer 10 nil
-;;                     (lambda ()
-;;                       (when (and (boundp 'eaf-browser-user-agent) original-user-agent)
-;;                         (setq eaf-browser-user-agent original-user-agent))
-;;                       (when (and (boundp 'eaf-browser-enable-cookie) original-cookie)
-;;                         (setq eaf-browser-enable-cookie original-cookie))
-;;                       (message "Настройки EAF восстановлены")))))
-
-;; (defun eaf-open-google-incognito ()
-;;   "Открыть Google в 'инкогнито' режиме (с очищенным кэшем)."
-;;   (interactive)
-;;   (eaf-clear-cache)
-;;   (eaf-open-browser-wrapper "https://www.google.com"))
-
-;; ;; Пробуем загрузить EAF при старте
-;; (when (my/ensure-eaf-loaded)
-;;   (my/setup-eaf-basic)
-
-;;   ;; Привязываем команды EAF к префиксной карте
-;;   (define-key my-eaf-map (kbd "b") 'eaf-open-browser-wrapper)
-;;   (define-key my-eaf-map (kbd "g") 'eaf-open-google)
-;;   (define-key my-eaf-map (kbd "t") 'my/eaf-open-terminal)
-;;   (define-key my-eaf-map (kbd "l") 'eaf-login-google)
-;;   (define-key my-eaf-map (kbd "i") 'eaf-open-google-incognito)
-;;   (define-key my-eaf-map (kbd "u") 'eaf-switch-user-agent)
-;;   (define-key my-eaf-map (kbd "c") 'eaf-clear-cache)
-
-;;   ;; Откладываем загрузку модулей и настройку клавиш
-;;   (run-with-timer 3 nil
-;;                   (lambda ()
-;;                     ;; Автоматическая загрузка модулей EAF (только текстовые)
-;;                     (dolist (module '(eaf-browser
-;;                                       eaf-pdf-viewer
-;;                                       eaf-image-viewer
-;;                                       eaf-markdown-previewer
-;;                                       eaf-terminal
-;;                                       eaf-org-previewer
-;;                                       eaf-rss-reader))
-;;                       (condition-case err
-;;                           (progn
-;;                             (require module)
-;;                             (message "EAF модуль %s загружен" module))
-;;                         (error
-;;                          (message "Не удалось загрузить модуль %s: %s" module err))))
-
-;;                     ;; Настройка параметров после загрузки модулей
-;;                     (when (boundp 'eaf-browser-user-agent)
-;;                       (setq eaf-browser-user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-;;                             eaf-browser-enable-javascript t
-;;                             eaf-browser-enable-cookie t
-;;                             eaf-browser-remember-history t
-;;                             eaf-browser-enable-password t
-;;                             eaf-browser-continue-where-left-off t
-;;                             eaf-browser-enable-adblocker t
-;;                             eaf-browser-default-zoom 1.0
-;;                             eaf-browser-download-path "~/Downloads"))
-
-;;                     (message "Все модули EAF загружены и настроены!"))))
-
-;; ;; Настройка горячих клавиш для браузера EAF
-;; (with-eval-after-load 'eaf-browser
-;;   ;; Добавляем хук для настройки клавиш браузера
-;;   (defun my/setup-eaf-browser-keys-hook ()
-;;     "Настраивает горячие клавиши для браузера EAF."
-;;     (when (derived-mode-p 'eaf-browser-mode)
-;;       ;; Перенос строки по Shift+RET
-;;       (local-set-key (kbd "<S-return>") (lambda () (interactive)
-;;                                           (eaf-call-async "execute_function" eaf--buffer-id "insert_newline")))
-
-;;       ;; Основные клавиши навигации
-;;       (local-set-key (kbd "M-<left>") 'eaf-browser-history-back)
-;;       (local-set-key (kbd "M-<right>") 'eaf-browser-history-forward)
-;;       (local-set-key (kbd "C-<left>") 'eaf-browser-history-back)
-;;       (local-set-key (kbd "C-<right>") 'eaf-browser-history-forward)
-;;       (local-set-key (kbd "C-c b") 'eaf-browser-history-back)
-;;       (local-set-key (kbd "C-c f") 'eaf-browser-history-forward)
-
-;;       ;; Масштабирование
-;;       (local-set-key (kbd "C--") 'eaf-browser-zoom-out)
-;;       (local-set-key (kbd "C-=") 'eaf-browser-zoom-in)
-;;       (local-set-key (kbd "C-0") 'eaf-browser-zoom-reset)
-
-;;       ;; Управление вкладками
-;;       (local-set-key (kbd "C-x t") 'eaf-create-blank-tab)
-;;       (local-set-key (kbd "C-x k") 'eaf-close-tab)
-;;       (local-set-key (kbd "C-x <right>") 'eaf-next-tab)
-;;       (local-set-key (kbd "C-x <left>") 'eaf-prev-tab)
-
-;;       ;; Прокрутка
-;;       (local-set-key (kbd "C-v") 'eaf-browser-scroll-up)
-;;       (local-set-key (kbd "M-v") 'eaf-browser-scroll-down)
-;;       (local-set-key (kbd "C-x >") 'eaf-browser-scroll-right)
-;;       (local-set-key (kbd "C-x <") 'eaf-browser-scroll-left)
-
-;;       ;; Поиск
-;;       (local-set-key (kbd "C-s") 'eaf-browser-search-text)
-;;       (local-set-key (kbd "C-r") 'eaf-browser-clear-search)
-
-;;       ;; Обновление
-;;       (local-set-key (kbd "F5") 'eaf-browser-refresh)
-;;       (local-set-key (kbd "C-x r") 'eaf-browser-refresh)
-;;       (local-set-key (kbd "C-x d") 'eaf-browser-toggle-dark-mode)))
-
-;;   (add-hook 'eaf-browser-mode-hook 'my/setup-eaf-browser-keys-hook))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 16. Завершение инициализации
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1773,9 +1598,7 @@
             ;; Показываем доступные команды
             (message "Команды управления пакетами: C-c g p [s]татус, [d]ownload, [u]pdate, [c]lean, [f]ix")
             (message "Команды для Lisp/SKILL: C-c g l [s]lime, [e]val, [b]uffer, [r]epl, [c]adence")
-            ;; (message "Команды для EAF: C-c g e [b]rowser, [g]oogle, [m]ail, [f]ile-manager")
             (message "Команды поиска: C-c g s [s]earch, [f]iles, [p]roject, [r]g")
-            ;; Дополнительная информация
             (when (featurep 'eaf)
               (message "EAF загружен. Будет использоваться только как текстовый браузер."))))
 
